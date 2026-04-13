@@ -42,6 +42,25 @@ async function callAI(system, messages, max_tokens = 900, image = null) {
   return data.text
 }
 
+// Resize + compress image to JPEG before sending to Gemini
+async function compressImage(file, maxDim = 768) {
+  return new Promise((resolve) => {
+    const img = new Image()
+    const url = URL.createObjectURL(file)
+    img.onload = () => {
+      const scale = Math.min(maxDim / img.width, maxDim / img.height, 1)
+      const canvas = document.createElement('canvas')
+      canvas.width = Math.round(img.width * scale)
+      canvas.height = Math.round(img.height * scale)
+      canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height)
+      URL.revokeObjectURL(url)
+      resolve(canvas.toDataURL('image/jpeg', 0.82).split(',')[1])
+    }
+    img.onerror = () => { URL.revokeObjectURL(url); resolve(null) }
+    img.src = url
+  })
+}
+
 // ─── Base components ──────────────────────────────────────────────────────────
 
 function Spinner() {
@@ -339,17 +358,18 @@ function PhotoNutrition({ onSave }) {
   const [result, setResult] = useState(null)
   const [error, setError] = useState('')
   const fileRef = useRef(null)
+  const camRef = useRef(null)
 
-  const handleFile = (e) => {
+  const handleFile = async (e) => {
     const file = e.target.files[0]
     if (!file) return
     if (preview) URL.revokeObjectURL(preview)
     setPreview(URL.createObjectURL(file))
-    setImgType(file.type || 'image/jpeg')
-    const reader = new FileReader()
-    reader.onload = (ev) => setImg(ev.target.result.split(',')[1])
-    reader.readAsDataURL(file)
+    setImgType('image/jpeg')
     setResult(null); setError('')
+    const compressed = await compressImage(file)
+    if (compressed) setImg(compressed)
+    else setError('No se pudo procesar la imagen. Intenta con otra.')
   }
 
   const analyze = async () => {
@@ -399,7 +419,16 @@ Macros en gramos. Calorías como entero.`,
           </div>
         )}
       </div>
-      <input ref={fileRef} type="file" accept="image/*" capture="environment" onChange={handleFile} style={{ display: 'none' }} />
+      {/* Two separate inputs: camera forces capture, gallery allows any file */}
+      <input ref={fileRef} type="file" accept="image/*" onChange={handleFile} style={{ display: 'none' }} />
+      <input ref={camRef} type="file" accept="image/*" capture="environment" onChange={handleFile} style={{ display: 'none' }} />
+
+      {!img && (
+        <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
+          <Btn variant="dark" size="sm" style={{ flex: 1 }} onClick={() => { fileRef.current.value = ''; fileRef.current.click() }}>🖼️ Galería</Btn>
+          <Btn variant="dark" size="sm" style={{ flex: 1 }} onClick={() => { camRef.current.value = ''; camRef.current.click() }}>📷 Cámara</Btn>
+        </div>
+      )}
 
       <Btn variant="ai" loading={loading} disabled={!img} onClick={analyze} style={{ width: '100%' }}>
         {loading ? 'Analizando imagen...' : '📷 Analizar foto con IA'}
@@ -915,6 +944,104 @@ function HistoryTab({ logs }) {
   )
 }
 
+// ─── AI Goal Wizard ───────────────────────────────────────────────────────────
+
+function AIGoalWizard({ wLogs, onApply, onClose }) {
+  const [desc, setDesc] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [result, setResult] = useState(null)
+  const [error, setError] = useState('')
+
+  const analyze = async () => {
+    if (!desc.trim()) return
+    setLoading(true); setResult(null); setError('')
+    try {
+      const lastW = [...(wLogs || [])].sort((a, b) => b.date.localeCompare(a.date))[0]?.weight
+      const raw = await callAI(
+        `Eres un nutricionista y entrenador personal experto. El usuario describió su objetivo de fitness. Analiza y responde ÚNICAMENTE con JSON válido, sin markdown:
+{"targetCals":number,"targetProtein":number,"gymDays":number,"activityLevel":"sedentary|light|moderate|very|extra","goalType":"lose|maintain|gain","targetWeight":number|null,"explanation":"explicación en español de 2-3 oraciones","tips":["tip1","tip2","tip3"]}
+Basa targetCals y targetProtein en el peso actual si se menciona${lastW ? ` (peso actual: ${lastW}kg)` : ''}. Para recomposición corporal (bajar grasa y ganar músculo al mismo tiempo) usa goalType "lose" con déficit moderado (~300kcal) y proteína alta (2.2-2.4g/kg). Para ganar músculo usa surplus ~300kcal. Para perder peso déficit ~500kcal.`,
+        [{ role: 'user', content: `Mi objetivo: ${desc}` }],
+        700
+      )
+      setResult(JSON.parse(raw.trim()))
+    } catch {
+      setError('No pude analizar. Describe tu objetivo con más detalle.')
+    }
+    setLoading(false)
+  }
+
+  const GOAL_LABELS = { lose: '📉 Bajar peso / Grasa', maintain: '⚖️ Mantener', gain: '📈 Ganar músculo' }
+
+  return (
+    <div>
+      <SLabel>Describe tu objetivo en tus propias palabras</SLabel>
+      <textarea
+        value={desc}
+        onChange={e => setDesc(e.target.value)}
+        rows={3}
+        placeholder="Ej: Quiero bajar grasa y ganar músculo al mismo tiempo. Tengo 80kg y quiero llegar a 72kg. Voy al gym 4 días a la semana y tengo 60 minutos por sesión."
+        style={{
+          width: '100%', background: T.bg3, border: `1px solid ${T.border}`,
+          borderRadius: 7, color: T.text, fontFamily: T.B, fontSize: 13,
+          padding: '8px 10px', resize: 'none', outline: 'none',
+        }}
+      />
+      <Btn variant="ai" loading={loading} disabled={!desc.trim()} onClick={analyze} style={{ width: '100%', marginTop: 8 }}>
+        {loading ? 'Calculando tus metas...' : '✨ Calcular mis metas con IA'}
+      </Btn>
+      {error && <p style={{ fontFamily: T.B, fontSize: 12, color: T.red, marginTop: 6 }}>{error}</p>}
+
+      {result && (
+        <div style={{ marginTop: 12, background: T.bg3, borderRadius: 8, padding: 12, border: `1px solid ${T.purple}44` }}>
+          <div style={{ fontFamily: T.B, fontSize: 10, color: T.purple, marginBottom: 8 }}>✨ Recomendación IA</div>
+          <p style={{ fontFamily: T.B, fontSize: 12, color: T.dim, fontStyle: 'italic', marginBottom: 10, lineHeight: 1.5 }}>"{result.explanation}"</p>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, marginBottom: 10 }}>
+            {[
+              ['🔥 Calorías/día', `${result.targetCals} kcal`, T.orange],
+              ['💪 Proteína/día', `${result.targetProtein}g`, T.lime],
+              ['📅 Días gym/sem', `${result.gymDays}`, T.blue],
+              ['🎯 Objetivo', GOAL_LABELS[result.goalType] || result.goalType, T.purple],
+            ].map(([label, val, color]) => (
+              <div key={label} style={{ background: T.bg4, borderRadius: 6, padding: 8 }}>
+                <div style={{ fontSize: 9, color: T.muted, fontFamily: T.B }}>{label}</div>
+                <div style={{ fontFamily: T.M, fontSize: 12, fontWeight: 700, color, marginTop: 2 }}>{val}</div>
+              </div>
+            ))}
+          </div>
+
+          {result.tips && (
+            <div style={{ marginBottom: 10 }}>
+              <div style={{ fontFamily: T.B, fontSize: 10, color: T.muted, marginBottom: 5 }}>CONSEJOS CLAVE</div>
+              {result.tips.map((t, i) => (
+                <div key={i} style={{ fontFamily: T.B, fontSize: 11, color: T.dim, marginBottom: 3 }}>• {t}</div>
+              ))}
+            </div>
+          )}
+
+          <div style={{ display: 'flex', gap: 6 }}>
+            <Btn style={{ flex: 1 }} onClick={() => {
+              onApply({
+                targetCals: String(result.targetCals),
+                targetProtein: String(result.targetProtein),
+                gymDays: String(result.gymDays),
+                activityLevel: result.activityLevel,
+                goalType: result.goalType,
+                ...(result.targetWeight ? { targetWeight: String(result.targetWeight) } : {}),
+              })
+              onClose()
+            }}>
+              ✓ Aplicar estas metas
+            </Btn>
+            <Btn variant="dark" onClick={() => setResult(null)}>Volver</Btn>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ─── NUTRITION Tab ────────────────────────────────────────────────────────────
 
 function NutritionTab({ wLogs, nutLogs, goals, onSaveWeight, onSaveNut, onSaveGoals }) {
@@ -924,6 +1051,7 @@ function NutritionTab({ wLogs, nutLogs, goals, onSaveWeight, onSaveNut, onSaveGo
   const [manualNut, setManualNut] = useState({ calories: '', protein: '', carbs: '', fat: '' })
   const [showGoals, setShowGoals] = useState(false)
   const [goalsEdit, setGoalsEdit] = useState({})
+  const [showWizard, setShowWizard] = useState(false)
   const todayNut = nutLogs.find(n => n.date === today())
   const tdee = calcTDEE(goals, wLogs)
   const targetCals = parseInt(goals?.targetCals) || tdee || 2000
@@ -1084,9 +1212,29 @@ function NutritionTab({ wLogs, nutLogs, goals, onSaveWeight, onSaveNut, onSaveGo
         </Card>
       )}
 
+      {/* AI Goal Wizard modal */}
+      <Modal open={showWizard} onClose={() => setShowWizard(false)} title="✨ Asistente de Metas IA">
+        <AIGoalWizard
+          wLogs={wLogs}
+          onApply={reco => setGoalsEdit(g => ({ ...g, ...reco }))}
+          onClose={() => setShowWizard(false)}
+        />
+      </Modal>
+
       {/* Profile + Goals modal */}
       <Modal open={showGoals} onClose={() => setShowGoals(false)} title="🎯 Perfil y Metas">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+
+          {/* Wizard entry point */}
+          <div style={{ background: `${T.purple}15`, border: `1px solid ${T.purple}44`, borderRadius: 8, padding: 12 }}>
+            <div style={{ fontFamily: T.B, fontSize: 12, color: T.text, marginBottom: 6 }}>
+              ¿No sabes cuántas calorías o proteína necesitas?
+            </div>
+            <Btn variant="ai" size="sm" style={{ width: '100%' }} onClick={() => { setShowGoals(false); setShowWizard(true) }}>
+              ✨ Calcular con IA — dime tu objetivo
+            </Btn>
+          </div>
+
           <div style={{ fontFamily: T.F, fontSize: 13, color: T.teal, letterSpacing: 1, marginBottom: 2 }}>DATOS PERSONALES</div>
 
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
@@ -1321,6 +1469,8 @@ function PlanTab({ logs, nutLogs, goals, wLogs, mealPlan, onSaveMealPlan }) {
   const [selectedDay, setSelectedDay] = useState(today())
   const [loadingPlan, setLoadingPlan] = useState(false)
   const [planError, setPlanError] = useState('')
+  const [loadingDayMeal, setLoadingDayMeal] = useState(false)
+  const [dayMealInput, setDayMealInput] = useState('')
   const tdee = calcTDEE(goals, wLogs)
   const targetCals = parseInt(goals?.targetCals) || tdee || 2000
 
@@ -1330,226 +1480,298 @@ function PlanTab({ logs, nutLogs, goals, wLogs, mealPlan, onSaveMealPlan }) {
     const monday = new Date(now)
     monday.setDate(now.getDate() - (day === 0 ? 6 : day - 1) + offset * 7)
     return Array.from({ length: 7 }, (_, i) => {
-      const d = new Date(monday)
-      d.setDate(monday.getDate() + i)
+      const d = new Date(monday); d.setDate(monday.getDate() + i)
       return d.toISOString().split('T')[0]
     })
   }
 
   const weekDays = getWeekDays(weekOffset)
-  const DAY_NAMES = ['L', 'M', 'X', 'J', 'V', 'S', 'D']
+  const DAY_SHORT = ['L', 'M', 'X', 'J', 'V', 'S', 'D']
 
-  const generateMealPlan = async () => {
+  const generateWeekPlan = async () => {
     setLoadingPlan(true); setPlanError('')
     try {
       const lastW = [...(wLogs || [])].sort((a, b) => b.date.localeCompare(a.date))[0]?.weight
       const proteinTarget = goals?.targetProtein || Math.round((parseFloat(lastW) || 70) * 2)
+      const gymDays = parseInt(goals?.gymDays) || 4
+      const workoutTime = goals?.workoutTime || 60
+      const goalType = goals?.goalType === 'lose' ? 'bajar grasa' : goals?.goalType === 'gain' ? 'ganar músculo' : 'mantenimiento'
       const raw = await callAI(
-        `Eres nutricionista experto en cocina colombiana y latinoamericana. Crea un plan de comidas semanal personalizado.
-Responde ÚNICAMENTE con JSON válido, sin markdown, sin texto extra:
-{"days":[{"day":"string","breakfast":"string (~Xcal)","lunch":"string (~Xcal)","dinner":"string (~Xcal)","snack":"string (~Xcal)","totalCals":number}]}
-Exactamente 7 días (Lunes a Domingo). Usa alimentos colombianos típicos y variados. Cada día cerca de ${targetCals} kcal totales. Proteína mínima ${proteinTarget}g/día. Formato: "Nombre del plato - ingredientes principales".`,
-        [{
-          role: 'user',
-          content: `Plan semanal para: peso ${lastW || '?'}kg, objetivo ${goals?.goalType === 'lose' ? 'bajar peso' : goals?.goalType === 'gain' ? 'ganar músculo' : 'mantener peso'}, ${goals?.gymDays || 4} días de gym. ${goals?.height ? `Estatura ${goals.height}cm.` : ''}`
-        }],
-        1800
+        `Eres coach de fitness y nutricionista experto. Crea un plan completo de 7 días.
+Objetivo: ${goalType}. Días de gym: ${gymDays}/semana. Tiempo por sesión: ${workoutTime} min.
+Calorías diarias: ~${targetCals} kcal. Proteína mínima: ${proteinTarget}g/día. Cocina colombiana variada.
+
+Responde ÚNICAMENTE con JSON válido, sin markdown ni texto extra:
+{"days":[{"day":"Lunes","isRest":false,"workout":{"name":"Full Body A","focus":"descripción breve","exercises":[{"name":"ejercicio","sets":4,"reps":"8-10","notes":"tip"}]},"breakfast":"~Xcal","lunch":"~Xcal","dinner":"~Xcal","snack":"~Xcal","totalCals":2200}]}
+
+Reglas:
+- Exactamente 7 días (Lunes a Domingo).
+- Si isRest=true, omite workout o ponlo null.
+- Distribuye los ${gymDays} días de gym a lo largo de la semana.
+- Cada día de gym: 4-6 ejercicios, varía grupos musculares (no repetir el mismo día seguido).
+- Los días de descanso igual tienen plan de comidas.`,
+        [{ role: 'user', content: `Genera el plan semanal completo para ${lastW || '75'}kg, objetivo: ${goalType}.` }],
+        2800
       )
       const parsed = JSON.parse(raw.trim())
-      onSaveMealPlan({ ...parsed, generated: today(), targetCals })
-    } catch (e) {
-      setPlanError('Error generando el plan. Intenta de nuevo.')
-    }
+      onSaveMealPlan({ ...(mealPlan || {}), ...parsed, generated: today(), targetCals, customDays: {} })
+    } catch { setPlanError('Error generando el plan. Intenta de nuevo.') }
     setLoadingPlan(false)
   }
 
+  const customizeDayMeal = async () => {
+    if (!dayMealInput.trim()) return
+    setLoadingDayMeal(true)
+    try {
+      const raw = await callAI(
+        `Eres nutricionista experto en cocina colombiana. El usuario quiere personalizar su comida de hoy.
+Responde ÚNICAMENTE con JSON válido, sin markdown:
+{"breakfast":"~Xcal","lunch":"~Xcal","dinner":"~Xcal","snack":"~Xcal","totalCals":number}
+Adapta el plan para incluir lo que el usuario quiere. Ajusta las otras comidas para llegar a ~${targetCals} kcal totales.`,
+        [{ role: 'user', content: `Hoy quiero comer: ${dayMealInput}. Adapta mi día completo.` }],
+        700
+      )
+      const parsed = JSON.parse(raw.trim())
+      onSaveMealPlan({
+        ...(mealPlan || {}),
+        customDays: { ...(mealPlan?.customDays || {}), [selectedDay]: { ...parsed, custom: true } },
+      })
+      setDayMealInput('')
+    } catch {}
+    setLoadingDayMeal(false)
+  }
+
+  const dayIndex = weekDays.indexOf(selectedDay)
+  const planDay = dayIndex >= 0 ? mealPlan?.days?.[dayIndex] : null
+  const customDay = mealPlan?.customDays?.[selectedDay]
+  const selectedMealDay = customDay || planDay
   const selectedLog = logs.find(l => l.date === selectedDay)
   const selectedNut = nutLogs.find(n => n.date === selectedDay)
-  const dayIndex = weekDays.indexOf(selectedDay)
-  const selectedMealDay = dayIndex >= 0 ? mealPlan?.days?.[dayIndex] : null
 
   return (
     <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+      {/* Header */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
         <div style={{ fontFamily: T.F, fontSize: 30, color: T.text, letterSpacing: 2 }}>PLAN</div>
-        {tdee && (
-          <div style={{ textAlign: 'right' }}>
-            <div style={{ fontFamily: T.M, fontSize: 9, color: T.muted }}>TDEE</div>
-            <div style={{ fontFamily: T.F, fontSize: 16, color: T.orange, letterSpacing: 1 }}>{tdee} kcal</div>
-          </div>
-        )}
+        <Btn size="sm" variant="ai" loading={loadingPlan} onClick={generateWeekPlan}>
+          {mealPlan?.days ? '↻ Regenerar' : '✨ Generar semana'}
+        </Btn>
       </div>
 
-      {/* Week navigation */}
-      <Card style={{ marginBottom: 11, padding: 10 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 8 }}>
-          <button onClick={() => setWeekOffset(w => w - 1)} style={{ background: 'none', border: `1px solid ${T.border}`, color: T.muted, fontSize: 14, cursor: 'pointer', borderRadius: 5, padding: '2px 8px', lineHeight: 1.4 }}>‹</button>
+      {/* Calendar */}
+      <Card style={{ marginBottom: 12, padding: '10px 8px 8px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 3, marginBottom: 6 }}>
+          <button onClick={() => setWeekOffset(w => w - 1)} style={{ background: 'none', border: `1px solid ${T.border}`, color: T.muted, fontSize: 16, cursor: 'pointer', borderRadius: 6, padding: '3px 9px', lineHeight: 1.3, flexShrink: 0 }}>‹</button>
           <div style={{ flex: 1, display: 'grid', gridTemplateColumns: 'repeat(7,1fr)', gap: 3 }}>
             {weekDays.map((date, i) => {
-              const hasWorkout = logs.some(l => l.date === date)
-              const hasNut = nutLogs.some(n => n.date === date)
+              const planD = mealPlan?.days?.[i]
+              const hasLog = logs.some(l => l.date === date)
               const isToday = date === today()
               const isSel = date === selectedDay
+              const isRest = planD?.isRest
               return (
-                <button
-                  key={date}
-                  onClick={() => setSelectedDay(date)}
-                  style={{
-                    background: isSel ? T.lime : isToday ? `${T.lime}15` : T.bg3,
-                    border: `1px solid ${isSel ? T.lime : isToday ? `${T.lime}44` : T.border}`,
-                    borderRadius: 7, padding: '5px 2px', cursor: 'pointer',
-                    display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2, outline: 'none',
-                  }}
-                >
-                  <span style={{ fontFamily: T.B, fontSize: 8, fontWeight: 700, color: isSel ? '#000' : T.muted }}>
-                    {DAY_NAMES[i]}
+                <button key={date} onClick={() => setSelectedDay(date)} style={{
+                  background: isSel ? T.lime : isToday ? `${T.lime}18` : T.bg3,
+                  border: `2px solid ${isSel ? T.limeD : isToday ? `${T.lime}55` : T.border}`,
+                  borderRadius: 9, padding: '6px 2px 5px', cursor: 'pointer',
+                  display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1, outline: 'none',
+                  transition: 'background 0.15s',
+                }}>
+                  <span style={{ fontFamily: T.M, fontSize: 8, color: isSel ? '#000' : T.muted, letterSpacing: 0.5 }}>{DAY_SHORT[i]}</span>
+                  <span style={{ fontFamily: T.B, fontSize: 14, fontWeight: 800, color: isSel ? '#000' : T.text, lineHeight: 1.1 }}>{new Date(date + 'T12:00:00').getDate()}</span>
+                  <span style={{ fontSize: 9, lineHeight: 1, marginTop: 1 }}>
+                    {planD ? (isRest ? '😴' : '💪') : hasLog ? '✓' : ' '}
                   </span>
-                  <span style={{ fontFamily: T.M, fontSize: 11, color: isSel ? '#000' : T.text }}>
-                    {new Date(date + 'T12:00:00').getDate()}
-                  </span>
-                  <div style={{ display: 'flex', gap: 2, minHeight: 6 }}>
-                    {hasWorkout && <div style={{ width: 4, height: 4, borderRadius: '50%', background: isSel ? '#000' : T.lime }} />}
-                    {hasNut && <div style={{ width: 4, height: 4, borderRadius: '50%', background: isSel ? '#000' : T.orange }} />}
-                  </div>
                 </button>
               )
             })}
           </div>
-          <button onClick={() => setWeekOffset(w => w + 1)} style={{ background: 'none', border: `1px solid ${T.border}`, color: T.muted, fontSize: 14, cursor: 'pointer', borderRadius: 5, padding: '2px 8px', lineHeight: 1.4 }}>›</button>
+          <button onClick={() => setWeekOffset(w => w + 1)} style={{ background: 'none', border: `1px solid ${T.border}`, color: T.muted, fontSize: 16, cursor: 'pointer', borderRadius: 6, padding: '3px 9px', lineHeight: 1.3, flexShrink: 0 }}>›</button>
         </div>
-        <div style={{ display: 'flex', gap: 12, justifyContent: 'center' }}>
-          <span style={{ fontFamily: T.B, fontSize: 9, color: T.muted, display: 'flex', alignItems: 'center', gap: 3 }}>
-            <span style={{ width: 6, height: 6, borderRadius: '50%', background: T.lime, display: 'inline-block' }} />Entreno
-          </span>
-          <span style={{ fontFamily: T.B, fontSize: 9, color: T.muted, display: 'flex', alignItems: 'center', gap: 3 }}>
-            <span style={{ width: 6, height: 6, borderRadius: '50%', background: T.orange, display: 'inline-block' }} />Nutrición
-          </span>
-        </div>
-      </Card>
-
-      {/* Selected day detail */}
-      <Card style={{ marginBottom: 11 }}>
-        <div style={{ fontFamily: T.F, fontSize: 16, color: T.lime, letterSpacing: 1, marginBottom: 10 }}>
-          {fdate(selectedDay).toUpperCase()}
-        </div>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-          {/* Workout */}
-          <div>
-            <SLabel>Entrenamiento</SLabel>
-            {selectedLog ? (
-              <div style={{ background: T.bg3, borderRadius: 6, padding: 8 }}>
-                <div style={{ fontFamily: T.B, fontWeight: 600, color: T.lime, fontSize: 11 }}>{selectedLog.routineName}</div>
-                <div style={{ fontFamily: T.M, fontSize: 9, color: T.muted, marginTop: 1 }}>
-                  {selectedLog.exercises.reduce((a, e) => a + e.sets.filter(s => s.done).length, 0)} series
+        {/* Workout name strip under each day */}
+        {mealPlan?.days && (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7,1fr)', gap: 3, paddingLeft: 32, paddingRight: 32 }}>
+            {mealPlan.days.map((d, i) => (
+              <div key={i} onClick={() => setSelectedDay(weekDays[i])} style={{ cursor: 'pointer', textAlign: 'center' }}>
+                <div style={{
+                  fontFamily: T.M, fontSize: 7, lineHeight: 1.2,
+                  color: weekDays[i] === selectedDay ? T.lime : d.isRest ? T.muted : T.dim,
+                  overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                }}>
+                  {d.isRest ? 'Desc.' : (d.workout?.name || 'Gym')}
                 </div>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 2, marginTop: 4 }}>
-                  {selectedLog.exercises.slice(0, 3).map((ex, i) => (
-                    <span key={i} style={{ background: T.bg4, color: T.muted, borderRadius: 3, padding: '1px 4px', fontSize: 9, fontFamily: T.M }}>{ex.name}</span>
-                  ))}
-                  {selectedLog.exercises.length > 3 && <span style={{ fontSize: 9, color: T.muted, fontFamily: T.M }}>+{selectedLog.exercises.length - 3}</span>}
-                </div>
-              </div>
-            ) : (
-              <div style={{ fontFamily: T.B, fontSize: 11, color: T.muted, padding: '6px 0' }}>Sin registro</div>
-            )}
-          </div>
-          {/* Nutrition */}
-          <div>
-            <SLabel>Nutrición</SLabel>
-            {selectedNut ? (
-              <div style={{ background: T.bg3, borderRadius: 6, padding: 8 }}>
-                {selectedNut.calories && <Tag color={T.orange} style={{ fontSize: 10 }}>{selectedNut.calories} kcal</Tag>}
-                <div style={{ marginTop: 4, display: 'flex', flexWrap: 'wrap', gap: 2 }}>
-                  {selectedNut.protein && <Tag color={T.lime}>{selectedNut.protein}g P</Tag>}
-                  {selectedNut.carbs && <Tag color={T.blue}>{selectedNut.carbs}g C</Tag>}
-                </div>
-                {selectedNut.notes && <p style={{ fontFamily: T.B, fontSize: 9, color: T.muted, marginTop: 4, fontStyle: 'italic' }}>"{selectedNut.notes.slice(0, 50)}{selectedNut.notes.length > 50 ? '...' : ''}"</p>}
-              </div>
-            ) : (
-              <div style={{ fontFamily: T.B, fontSize: 11, color: T.muted, padding: '6px 0' }}>Sin registro</div>
-            )}
-          </div>
-        </div>
-
-        {/* Selected day meal plan */}
-        {selectedMealDay && (
-          <div style={{ marginTop: 10, borderTop: `1px solid ${T.border}`, paddingTop: 10 }}>
-            <div style={{ fontFamily: T.M, fontSize: 9, color: T.purple, marginBottom: 6 }}>✨ PLAN IA PARA ESTE DÍA</div>
-            {[['🌅', 'Desayuno', selectedMealDay.breakfast], ['☀️', 'Almuerzo', selectedMealDay.lunch], ['🌙', 'Cena', selectedMealDay.dinner], ['🍎', 'Merienda', selectedMealDay.snack]].map(([icon, label, text]) => text && (
-              <div key={label} style={{ display: 'flex', gap: 6, padding: '3px 0' }}>
-                <span style={{ fontSize: 11, minWidth: 16 }}>{icon}</span>
-                <span style={{ fontFamily: T.B, fontSize: 10, color: T.muted, minWidth: 55 }}>{label}</span>
-                <span style={{ fontFamily: T.B, fontSize: 10, color: T.dim, flex: 1 }}>{text}</span>
               </div>
             ))}
-            {selectedMealDay.totalCals && (
-              <div style={{ marginTop: 5, textAlign: 'right' }}>
-                <Tag color={T.orange}>{selectedMealDay.totalCals} kcal totales</Tag>
-              </div>
-            )}
           </div>
         )}
       </Card>
 
-      {/* Meal plan section */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-        <div style={{ fontFamily: T.F, fontSize: 16, color: T.purple, letterSpacing: 1 }}>PLAN SEMANAL IA</div>
-        <Btn size="sm" variant="ai" loading={loadingPlan} onClick={generateMealPlan}>
-          {mealPlan ? '↻ Regenerar' : '✨ Generar'}
-        </Btn>
-      </div>
-
+      {/* Empty state */}
+      {!mealPlan?.days && !loadingPlan && (
+        <Card style={{ textAlign: 'center', padding: 32, marginBottom: 12 }}>
+          <div style={{ fontSize: 38, marginBottom: 10 }}>📆</div>
+          <p style={{ fontFamily: T.B, fontSize: 13, color: T.text, marginBottom: 5 }}>Genera tu plan semanal</p>
+          <p style={{ fontFamily: T.B, fontSize: 11, color: T.muted, marginBottom: 10 }}>
+            La IA crea una rutina diferente para cada día de gym + plan de comidas, todo ajustado a tu objetivo.
+          </p>
+          {!goals?.height && <p style={{ fontFamily: T.B, fontSize: 11, color: T.orange }}>💡 Completa tu perfil en Nutrición para mejores resultados.</p>}
+        </Card>
+      )}
+      {loadingPlan && (
+        <Card style={{ textAlign: 'center', padding: 32, marginBottom: 12 }}>
+          <Spinner />
+          <p style={{ fontFamily: T.B, fontSize: 12, color: T.muted, marginTop: 10 }}>Generando rutinas y comidas para los 7 días...</p>
+        </Card>
+      )}
       {planError && <p style={{ fontFamily: T.B, fontSize: 12, color: T.red, marginBottom: 8 }}>{planError}</p>}
 
-      {!mealPlan && !loadingPlan && (
-        <Card style={{ textAlign: 'center', padding: 28 }}>
-          <div style={{ fontSize: 30, marginBottom: 8 }}>🍽️</div>
-          <p style={{ fontFamily: T.B, fontSize: 12, color: T.muted, marginBottom: 10 }}>
-            Genera un plan de alimentación semanal con desayuno, almuerzo, cena y merienda para cada día.
-          </p>
-          {!goals?.height && (
-            <p style={{ fontFamily: T.B, fontSize: 11, color: T.orange }}>
-              💡 Completa tu perfil en Nutrición para mejores resultados.
-            </p>
+      {/* Selected day detail */}
+      {(mealPlan?.days || selectedLog) && !loadingPlan && (
+        <Card style={{ marginBottom: 12 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+            <div style={{ fontFamily: T.F, fontSize: 17, color: T.lime, letterSpacing: 1 }}>
+              {fdate(selectedDay).toUpperCase()}
+            </div>
+            {planDay?.isRest && <Tag color={T.muted}>😴 Descanso</Tag>}
+          </div>
+
+          {/* AI Workout */}
+          {planDay && !planDay.isRest && planDay.workout && (
+            <div style={{ marginBottom: 14 }}>
+              <SLabel>Rutina del día</SLabel>
+              <div style={{ background: `${T.purple}12`, border: `1px solid ${T.purple}44`, borderRadius: 9, padding: 11 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 6 }}>
+                  <div>
+                    <div style={{ fontFamily: T.M, fontSize: 13, color: T.purple, letterSpacing: 0.5 }}>✨ {planDay.workout.name}</div>
+                    {planDay.workout.focus && <div style={{ fontFamily: T.B, fontSize: 10, color: T.muted, marginTop: 2 }}>{planDay.workout.focus}</div>}
+                  </div>
+                  {selectedLog && <Tag color={T.lime}>✓ Hecho</Tag>}
+                </div>
+                {planDay.workout.exercises?.map((ex, i) => (
+                  <div key={i} style={{ display: 'flex', gap: 8, padding: '6px 0', borderTop: `1px solid ${T.border}`, alignItems: 'flex-start' }}>
+                    <div style={{ background: T.purple, color: '#fff', fontFamily: T.M, fontSize: 9, borderRadius: 4, padding: '2px 6px', minWidth: 20, textAlign: 'center', marginTop: 2, flexShrink: 0 }}>{i + 1}</div>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontFamily: T.B, fontSize: 13, color: T.text, fontWeight: 700 }}>{ex.name}</div>
+                      <div style={{ fontFamily: T.M, fontSize: 11, color: T.lime }}>{ex.sets} series × {ex.reps} reps</div>
+                      {ex.notes && <div style={{ fontFamily: T.B, fontSize: 10, color: T.muted, marginTop: 2 }}>💡 {ex.notes}</div>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
           )}
+
+          {/* Logged workout (no AI plan yet) */}
+          {!planDay && selectedLog && (
+            <div style={{ marginBottom: 12 }}>
+              <SLabel>Entrenamiento registrado</SLabel>
+              <div style={{ background: T.bg3, borderRadius: 7, padding: 9 }}>
+                <div style={{ fontFamily: T.B, fontWeight: 700, color: T.lime, fontSize: 12 }}>{selectedLog.routineName}</div>
+                <div style={{ fontFamily: T.M, fontSize: 9, color: T.muted, marginTop: 2 }}>
+                  {selectedLog.exercises.reduce((a, e) => a + e.sets.filter(s => s.done).length, 0)} series completadas
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Nutrition logged */}
+          {selectedNut && (
+            <div style={{ marginBottom: 12 }}>
+              <SLabel>Nutrición registrada</SLabel>
+              <div style={{ background: T.bg3, borderRadius: 7, padding: 9, display: 'flex', gap: 5, flexWrap: 'wrap' }}>
+                {selectedNut.calories && <Tag color={T.orange}>{selectedNut.calories} kcal</Tag>}
+                {selectedNut.protein && <Tag color={T.lime}>{selectedNut.protein}g P</Tag>}
+                {selectedNut.carbs && <Tag color={T.blue}>{selectedNut.carbs}g C</Tag>}
+              </div>
+            </div>
+          )}
+
+          {/* Meals */}
+          {selectedMealDay && (
+            <div style={{ borderTop: `1px solid ${T.border}`, paddingTop: 10, marginBottom: 10 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 7 }}>
+                <SLabel>Comidas</SLabel>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  {customDay && <span style={{ fontFamily: T.M, fontSize: 9, color: T.teal }}>✏️ Personalizado</span>}
+                  {customDay && (
+                    <button
+                      onClick={() => {
+                        const updated = { ...(mealPlan || {}) }
+                        const cd = { ...(updated.customDays || {}) }
+                        delete cd[selectedDay]
+                        updated.customDays = cd
+                        onSaveMealPlan(updated)
+                      }}
+                      style={{ background: 'none', border: 'none', color: T.muted, fontFamily: T.B, fontSize: 10, cursor: 'pointer', padding: 0 }}
+                    >↩ Restablecer</button>
+                  )}
+                </div>
+              </div>
+              {[['🌅', 'Desayuno', selectedMealDay.breakfast], ['☀️', 'Almuerzo', selectedMealDay.lunch], ['🌙', 'Cena', selectedMealDay.dinner], ['🍎', 'Merienda', selectedMealDay.snack]].map(([icon, label, text]) => text && (
+                <div key={label} style={{ display: 'flex', gap: 7, padding: '5px 0', borderBottom: `1px solid ${T.border}` }}>
+                  <span style={{ fontSize: 13, minWidth: 20 }}>{icon}</span>
+                  <span style={{ fontFamily: T.B, fontSize: 10, color: T.muted, minWidth: 58 }}>{label}</span>
+                  <span style={{ fontFamily: T.B, fontSize: 11, color: T.dim, flex: 1 }}>{text}</span>
+                </div>
+              ))}
+              {selectedMealDay.totalCals && <div style={{ marginTop: 6, textAlign: 'right' }}><Tag color={T.orange}>{selectedMealDay.totalCals} kcal</Tag></div>}
+            </div>
+          )}
+
+          {/* Meal customization */}
+          <div style={{ borderTop: selectedMealDay ? `1px solid ${T.border}` : 'none', paddingTop: selectedMealDay ? 10 : 0 }}>
+            <SLabel>Personalizar comida con IA</SLabel>
+            <div style={{ display: 'flex', gap: 6 }}>
+              <input
+                value={dayMealInput}
+                onChange={e => setDayMealInput(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && customizeDayMeal()}
+                placeholder="Ej: hoy quiero arroz con pollo y aguacate..."
+                style={{
+                  flex: 1, background: T.bg3, border: `1px solid ${T.border}`,
+                  borderRadius: 7, color: T.text, fontFamily: T.B, fontSize: 11,
+                  padding: '8px 10px', outline: 'none',
+                }}
+              />
+              <Btn size="sm" variant="ai" loading={loadingDayMeal} disabled={!dayMealInput.trim()} onClick={customizeDayMeal}>
+                {loadingDayMeal ? '' : '✨'}
+              </Btn>
+            </div>
+          </div>
         </Card>
       )}
 
-      {loadingPlan && (
-        <Card style={{ textAlign: 'center', padding: 28 }}>
-          <Spinner />
-          <p style={{ fontFamily: T.B, fontSize: 12, color: T.muted, marginTop: 10 }}>Creando tu plan semanal personalizado...</p>
-        </Card>
-      )}
-
+      {/* Weekly overview */}
       {mealPlan?.days && !loadingPlan && (
         <div>
+          <div style={{ fontFamily: T.M, fontSize: 10, color: T.muted, letterSpacing: 1, marginBottom: 8 }}>RESUMEN SEMANAL</div>
           {mealPlan.days.map((day, i) => {
             const dayDate = weekDays[i]
             const isSel = dayDate === selectedDay
+            const isCustom = !!mealPlan?.customDays?.[dayDate]
+            const displayDay = mealPlan.customDays?.[dayDate] || day
             return (
-              <Card
-                key={i}
-                onClick={() => dayDate && setSelectedDay(dayDate)}
-                style={{ marginBottom: 7, borderColor: isSel ? `${T.purple}55` : T.border, cursor: 'pointer' }}
-              >
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 7 }}>
-                  <span style={{ fontFamily: T.F, fontSize: 15, color: isSel ? T.purple : T.text, letterSpacing: 1 }}>
-                    {day.day.toUpperCase()}
-                  </span>
-                  {day.totalCals && <Tag color={T.orange}>{day.totalCals} kcal</Tag>}
-                </div>
-                {[['🌅', day.breakfast], ['☀️', day.lunch], ['🌙', day.dinner], ['🍎', day.snack]].map(([icon, text], j) => text && (
-                  <div key={j} style={{ display: 'flex', gap: 6, padding: '3px 0', borderBottom: j < 3 ? `1px solid ${T.border}` : 'none' }}>
-                    <span style={{ fontSize: 11, minWidth: 16 }}>{icon}</span>
-                    <span style={{ fontFamily: T.B, fontSize: 11, color: T.dim, flex: 1 }}>{text}</span>
+              <Card key={i} onClick={() => dayDate && setSelectedDay(dayDate)}
+                style={{ marginBottom: 7, border: `1px solid ${isSel ? T.lime : T.border}`, cursor: 'pointer', padding: '10px 12px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 7, flex: 1, minWidth: 0 }}>
+                    <span style={{ fontFamily: T.F, fontSize: 13, color: isSel ? T.lime : T.text, letterSpacing: 1, flexShrink: 0 }}>{day.day.toUpperCase()}</span>
+                    {day.isRest
+                      ? <Tag color={T.muted}>😴 Descanso</Tag>
+                      : <span style={{ background: `${T.purple}20`, color: T.purple, border: `1px solid ${T.purple}38`, borderRadius: 4, padding: '2px 7px', fontSize: 11, fontFamily: T.M, fontWeight: 700, display: 'inline-block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 110 }}>💪 {day.workout?.name || 'Gym'}</span>
+                    }
+                    {isCustom && <Tag color={T.teal}>✏️</Tag>}
                   </div>
-                ))}
+                  {displayDay.totalCals && <span style={{ background: `${T.orange}20`, color: T.orange, border: `1px solid ${T.orange}38`, borderRadius: 4, padding: '2px 7px', fontSize: 11, fontFamily: T.M, fontWeight: 700, display: 'inline-block', flexShrink: 0 }}>{displayDay.totalCals} kcal</span>}
+                </div>
+                {!day.isRest && day.workout?.focus && (
+                  <div style={{ fontFamily: T.B, fontSize: 10, color: T.muted, marginTop: 4 }}>{day.workout.focus}</div>
+                )}
               </Card>
             )
           })}
-          <p style={{ fontFamily: T.M, fontSize: 9, color: T.muted, textAlign: 'center', marginTop: 4 }}>
-            Generado {fdate(mealPlan.generated)} · {mealPlan.targetCals} kcal/día objetivo
+          <p style={{ fontFamily: T.M, fontSize: 9, color: T.muted, textAlign: 'center', marginTop: 6 }}>
+            Generado {fdate(mealPlan.generated)} · Toca un día para ver el detalle
           </p>
         </div>
       )}
@@ -1575,14 +1797,59 @@ function CoachTab({ goals, routines, wLogs }) {
   const lastW = [...wLogs].sort((a, b) => b.date.localeCompare(a.date))[0]?.weight
   const tdee = calcTDEE(goals, wLogs)
 
+  const [openGuide, setOpenGuide] = useState(null) // 'shakes' | 'creatine' | null
+
   const QUICK_ACTIONS = [
-    { label: '🥤 Batidos proteicos', q: 'Dame recetas de batidos proteicos caseros que pueda hacer en Colombia con ingredientes fáciles.' },
-    { label: '💊 Creatina 101', q: '¿Cómo tomo la creatina? Dosis, cuándo tomarla y qué tipo comprar.' },
+    { label: '🥤 Batidos proteicos', q: 'Dame 4 recetas detalladas de batidos proteicos caseros con ingredientes fáciles de conseguir en Colombia. Para cada batido incluye: nombre, ingredientes con cantidades exactas, macros aproximados (calorías, proteína, carbs, grasa), y para qué momento del día es ideal (pre-entreno, post-entreno, desayuno, antes de dormir).' },
+    { label: '💊 Creatina 101', q: 'Explícame todo sobre la creatina de forma completa: dosis diaria recomendada, si necesito fase de carga, cuál es el mejor momento para tomarla (antes o después del entreno), con qué mezclarla, qué tipo comprar (monohidrato vs otras), cuánto tarda en hacer efecto, mitos comunes, efectos secundarios reales, y si sirve para bajar grasa o solo para músculo.' },
     { label: '🍽️ Comidas para músculo', q: 'Dame un plan de alimentación colombiano para ganar músculo con desayuno, almuerzo, merienda y cena.' },
     { label: '🔥 Bajar grasa', q: 'Dame comidas colombianas altas en proteína y bajas en calorías para perder grasa.' },
     { label: '🍎 ¿Qué meriendo?', q: `Dame 5 ideas de meriendas saludables y altas en proteína${lastW ? ` para alguien de ${lastW}kg` : ''} que quiere ${goals?.goalType === 'lose' ? 'bajar de peso' : goals?.goalType === 'gain' ? 'ganar músculo' : 'mantenerse en forma'}.` },
     { label: '😴 Recuperación', q: '¿Qué debo comer y hacer después del entrenamiento para recuperarme rápido?' },
     { label: '📅 Plan completo', q: `Diseña un plan completo de ${goals?.gymDays || 4} días de entrenamiento para la semana con nombres de ejercicios, series y descansos.` },
+  ]
+
+  const SHAKE_RECIPES = [
+    {
+      name: '💪 Clásico Ganador de Masa',
+      time: 'Post-entreno o desayuno',
+      ingredients: ['1 taza leche entera (240ml)', '1 banano maduro', '2 cdas mantequilla de maní', '1 scoop proteína en polvo (30g)', '1 cda avena en hojuelas', '5 cubos de hielo'],
+      macros: { cal: 520, pro: 38, carb: 52, fat: 16 },
+      tip: 'Ideal para ganar masa. Si no tienes proteína en polvo, agrega 1 taza de leche extra + 1 huevo.'
+    },
+    {
+      name: '🔥 Quema Grasa con Proteína',
+      time: 'Desayuno o merienda',
+      ingredients: ['1 taza leche descremada (240ml)', '½ taza yogur griego natural', '½ banano', '1 cda cacao en polvo sin azúcar', '1 puñado espinacas baby', '5 cubos de hielo'],
+      macros: { cal: 280, pro: 26, carb: 30, fat: 4 },
+      tip: 'Bajo en calorías y alto en saciedad. Las espinacas no se sienten pero suman hierro y fibra.'
+    },
+    {
+      name: '🌙 Caseína Nocturna Casera',
+      time: 'Antes de dormir',
+      ingredients: ['1 taza leche entera tibia (240ml)', '½ taza cuajada o queso cottage', '1 cda miel de abejas', '½ cdita canela en polvo', '1 cda mantequilla de maní'],
+      macros: { cal: 340, pro: 28, carb: 22, fat: 14 },
+      tip: 'La cuajada/cottage tiene caseína natural: digestión lenta que alimenta los músculos mientras duermes.'
+    },
+    {
+      name: '⚡ Pre-Entreno Energético',
+      time: '45 min antes del entreno',
+      ingredients: ['1 taza jugo de naranja natural (200ml)', '1 banano', '½ taza avena cocida', '1 scoop proteína en polvo (30g)', '1 cdita jengibre rallado', 'Hielo al gusto'],
+      macros: { cal: 430, pro: 30, carb: 62, fat: 5 },
+      tip: 'Los carbos del banano y la avena dan energía rápida + sostenida para el entreno.'
+    },
+  ]
+
+  const CREATINE_GUIDE = [
+    { q: '¿Cuánta tomo?', a: '3–5 gramos al día. Con eso es suficiente. No necesitas más.' },
+    { q: '¿Necesito fase de carga?', a: 'No es necesaria. La carga (20g/día x 5 días) solo satura los músculos más rápido, pero llegar al mismo resultado tomando 5g/día solo toma 3–4 semanas más. La fase de carga puede causar molestia estomacal.' },
+    { q: '¿Cuándo tomarla?', a: 'Cualquier momento del día funciona. Post-entreno puede ser ligeramente superior según algunos estudios, pero la consistencia diaria importa más que el timing.' },
+    { q: '¿Con qué mezclarla?', a: 'Con jugo de frutas (la glucosa mejora absorción) o agua. Evita café o bebidas calientes — el calor puede degradar la creatina.' },
+    { q: '¿Qué tipo comprar?', a: 'Monohidrato de creatina. Es la más estudiada, la más barata y la más efectiva. Las versiones "kre-alkalyn", "etil ester" o "HCl" no tienen ventajas comprobadas y cuestan más.' },
+    { q: '¿Cuánto tarda en funcionar?', a: 'Entre 3–4 semanas tomándola diario. Notarás más fuerza, mejor rendimiento y leve aumento de peso (es agua en los músculos, no grasa).' },
+    { q: '¿Engorda?', a: 'No acumula grasa. El aumento de peso inicial (1–2 kg) es retención de agua intramuscular, lo cual es beneficioso para el rendimiento.' },
+    { q: '¿Daña los riñones?', a: 'En personas sanas, NO. Décadas de estudios lo confirman. Si tienes enfermedad renal preexistente, consulta médico.' },
+    { q: '¿Sirve para perder grasa?', a: 'Indirectamente sí: más fuerza → mejor entreno → más músculo → mayor metabolismo. No es un quemador de grasa directo.' },
   ]
 
   const systemPrompt = `Eres un coach de fitness y nutrición experto, amigable y directo, que habla en español colombiano informal.
@@ -1620,7 +1887,21 @@ Responde de forma concisa y práctica. Usa saltos de línea y bullets cuando ayu
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-      <div style={{ fontFamily: T.F, fontSize: 30, color: T.text, letterSpacing: 2, marginBottom: 10 }}>COACH IA</div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+        <div style={{ fontFamily: T.F, fontSize: 30, color: T.text, letterSpacing: 2 }}>COACH IA</div>
+        <div style={{ display: 'flex', gap: 5 }}>
+          <button onClick={() => setOpenGuide(openGuide === 'shakes' ? null : 'shakes')} style={{
+            background: openGuide === 'shakes' ? T.lime : T.bg3, border: `1px solid ${openGuide === 'shakes' ? T.limeD : T.border}`,
+            borderRadius: 7, color: openGuide === 'shakes' ? '#000' : T.dim, fontFamily: T.B,
+            fontSize: 10, padding: '5px 9px', cursor: 'pointer', outline: 'none',
+          }}>🥤 Batidos</button>
+          <button onClick={() => setOpenGuide(openGuide === 'creatine' ? null : 'creatine')} style={{
+            background: openGuide === 'creatine' ? T.lime : T.bg3, border: `1px solid ${openGuide === 'creatine' ? T.limeD : T.border}`,
+            borderRadius: 7, color: openGuide === 'creatine' ? '#000' : T.dim, fontFamily: T.B,
+            fontSize: 10, padding: '5px 9px', cursor: 'pointer', outline: 'none',
+          }}>💊 Creatina</button>
+        </div>
+      </div>
 
       <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', marginBottom: 10, flexShrink: 0 }}>
         {QUICK_ACTIONS.map(a => (
@@ -1633,6 +1914,55 @@ Responde de forma concisa y práctica. Usa saltos de línea y bullets cuando ayu
           </button>
         ))}
       </div>
+
+      {/* Guide panels */}
+      {openGuide === 'shakes' && (
+        <div style={{ background: T.bg3, border: `1px solid ${T.border}`, borderRadius: 10, padding: '10px 12px', marginBottom: 8, overflowY: 'auto', maxHeight: 340, flexShrink: 0 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+            <span style={{ fontFamily: T.M, fontSize: 12, color: T.lime, letterSpacing: 1 }}>🥤 BATIDOS PROTEICOS</span>
+            <button onClick={() => setOpenGuide(null)} style={{ background: 'none', border: 'none', color: T.dim, cursor: 'pointer', fontSize: 16, lineHeight: 1 }}>×</button>
+          </div>
+          {SHAKE_RECIPES.map((r, i) => (
+            <div key={i} style={{ marginBottom: 12, paddingBottom: 12, borderBottom: i < SHAKE_RECIPES.length - 1 ? `1px solid ${T.border}` : 'none' }}>
+              <div style={{ fontFamily: T.B, fontSize: 13, color: T.text, marginBottom: 2 }}>{r.name}</div>
+              <div style={{ fontFamily: T.M, fontSize: 10, color: T.purple, marginBottom: 6 }}>⏰ {r.time}</div>
+              <div style={{ display: 'flex', gap: 6, marginBottom: 6 }}>
+                {[['KCAL', r.macros.cal, T.lime], ['PROT', `${r.macros.pro}g`, '#4fc3f7'], ['CARB', `${r.macros.carb}g`, '#ffb74d'], ['GRAS', `${r.macros.fat}g`, '#ef9a9a']].map(([l, v, c]) => (
+                  <div key={l} style={{ background: T.bg2, borderRadius: 6, padding: '3px 7px', textAlign: 'center', flex: 1 }}>
+                    <div style={{ fontFamily: T.M, fontSize: 8, color: T.dim }}>{l}</div>
+                    <div style={{ fontFamily: T.B, fontSize: 12, color: c }}>{v}</div>
+                  </div>
+                ))}
+              </div>
+              <ul style={{ margin: '0 0 4px 0', padding: '0 0 0 14px' }}>
+                {r.ingredients.map((ing, j) => <li key={j} style={{ fontFamily: T.B, fontSize: 11, color: T.dim, lineHeight: 1.6 }}>{ing}</li>)}
+              </ul>
+              <div style={{ fontFamily: T.B, fontSize: 11, color: T.purple, marginTop: 4 }}>💡 {r.tip}</div>
+            </div>
+          ))}
+        </div>
+      )}
+      {openGuide === 'creatine' && (
+        <div style={{ background: T.bg3, border: `1px solid ${T.border}`, borderRadius: 10, padding: '10px 12px', marginBottom: 8, overflowY: 'auto', maxHeight: 340, flexShrink: 0 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+            <span style={{ fontFamily: T.M, fontSize: 12, color: T.lime, letterSpacing: 1 }}>💊 GUÍA COMPLETA: CREATINA</span>
+            <button onClick={() => setOpenGuide(null)} style={{ background: 'none', border: 'none', color: T.dim, cursor: 'pointer', fontSize: 16, lineHeight: 1 }}>×</button>
+          </div>
+          <div style={{ background: T.bg2, borderRadius: 8, padding: '8px 10px', marginBottom: 10, display: 'flex', gap: 8, alignItems: 'center' }}>
+            <span style={{ fontSize: 20 }}>⭐</span>
+            <div>
+              <div style={{ fontFamily: T.B, fontSize: 12, color: T.lime }}>Recomendación directa</div>
+              <div style={{ fontFamily: T.B, fontSize: 11, color: T.dim }}>Monohidrato de creatina • 5g/día • cualquier hora • con jugo de frutas</div>
+            </div>
+          </div>
+          {CREATINE_GUIDE.map((item, i) => (
+            <div key={i} style={{ marginBottom: 8, paddingBottom: 8, borderBottom: i < CREATINE_GUIDE.length - 1 ? `1px solid ${T.border}` : 'none' }}>
+              <div style={{ fontFamily: T.M, fontSize: 11, color: T.text, marginBottom: 2 }}>❓ {item.q}</div>
+              <div style={{ fontFamily: T.B, fontSize: 12, color: T.dim, lineHeight: 1.5 }}>{item.a}</div>
+            </div>
+          ))}
+        </div>
+      )}
 
       <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 8, paddingBottom: 8, minHeight: 0 }}>
         {messages.map((m, i) => (
@@ -1824,3 +2154,4 @@ export default function App() {
     </div>
   )
 }
+
