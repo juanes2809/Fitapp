@@ -42,6 +42,15 @@ async function callAI(system, messages, max_tokens = 900, image = null) {
   return data.text
 }
 
+// Extract JSON from AI response (strips markdown code fences if present)
+function extractJSON(text) {
+  const clean = text.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim()
+  const start = clean.indexOf('{')
+  const end = clean.lastIndexOf('}')
+  if (start !== -1 && end !== -1 && end > start) return clean.slice(start, end + 1)
+  return clean
+}
+
 // Resize + compress image to JPEG before sending to Gemini
 async function compressImage(file, maxDim = 768) {
   return new Promise((resolve) => {
@@ -384,7 +393,7 @@ Macros en gramos. Calorías como entero.`,
         900,
         { data: img, mimeType: imgType }
       )
-      setResult(JSON.parse(raw.trim()))
+      setResult(JSON.parse(extractJSON(raw)))
     } catch {
       setError('No pude analizar la imagen. Intenta con otra foto más clara.')
     }
@@ -468,7 +477,7 @@ function AINutrition({ onSave }) {
 Los macros van en gramos. Calorías como entero.`,
         [{ role: 'user', content: `Lo que comí hoy: ${text}` }]
       )
-      setResult(JSON.parse(raw.trim()))
+      setResult(JSON.parse(extractJSON(raw)))
     } catch {
       setError('No pude analizar. Describe mejor lo que comiste.')
     }
@@ -528,7 +537,7 @@ Entre 4 y 8 ejercicios. El campo weight siempre como string vacío "". Tips brev
         [{ role: 'user', content: prompt }],
         800
       )
-      const parsed = JSON.parse(raw.trim())
+      const parsed = JSON.parse(extractJSON(raw))
       parsed.exercises = parsed.exercises.map(e => ({ ...e, id: e.id || uid() }))
       setResult(parsed)
     } catch {
@@ -1043,7 +1052,7 @@ Basa targetCals y targetProtein en el peso actual si se menciona${lastW ? ` (pes
         [{ role: 'user', content: `Mi objetivo: ${desc}` }],
         700
       )
-      setResult(JSON.parse(raw.trim()))
+      setResult(JSON.parse(extractJSON(raw)))
     } catch {
       setError('No pude analizar. Describe tu objetivo con más detalle.')
     }
@@ -1578,7 +1587,7 @@ const SPLITS = [
   { id: 'custom', label: 'Personalizado', desc: 'La IA decide el split ideal', days: null },
 ]
 
-function PlanTab({ logs, nutLogs, goals, wLogs, mealPlan, onSaveMealPlan }) {
+function PlanTab({ logs, nutLogs, goals, wLogs, mealPlan, onSaveMealPlan, routines, onSaveRoutine, onDeleteRoutine }) {
   const [weekOffset, setWeekOffset] = useState(0)
   const [selectedDay, setSelectedDay] = useState(today())
   const [loadingPlan, setLoadingPlan] = useState(false)
@@ -1611,44 +1620,57 @@ function PlanTab({ logs, nutLogs, goals, wLogs, mealPlan, onSaveMealPlan }) {
       const gymDays = parseInt(goals?.gymDays) || 4
       const workoutTime = goals?.workoutTime || 60
       const goalType = goals?.goalType === 'lose' ? 'bajar grasa' : goals?.goalType === 'gain' ? 'ganar músculo' : 'mantenimiento'
-      const selectedSplit = SPLITS.find(s => s.id === splitType)
+      const selectedSplit = SPLITS.find(s => s.id === splitType) || SPLITS[0]
 
-      // Build split day assignments
-      const gymDayIndices = []
-      for (let i = 0; i < 7 && gymDayIndices.length < gymDays; i++) {
-        if (selectedSplit?.days?.[i] !== 'Descanso') gymDayIndices.push(i)
-      }
-      const splitAssignment = Array.from({ length: 7 }, (_, i) => {
-        if (!gymDayIndices.includes(i)) return 'Descanso activo — sin pesas'
-        const splitDays = selectedSplit?.days
-        if (splitDays) return splitDays[gymDayIndices.indexOf(i)] || splitDays[gymDayIndices.indexOf(i) % splitDays.filter(d => d !== 'Descanso').length]
-        return 'Decidir según el split'
-      })
-      const dayNames = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo']
-      const splitPromptPart = selectedSplit?.id === 'custom'
-        ? `Split: elige el más adecuado para ${gymDays} días/semana y objetivo ${goalType}.`
-        : `Split: ${selectedSplit?.label}.\nAsignación de días:\n${dayNames.map((d, i) => `- ${d}: ${splitAssignment[i]}`).join('\n')}`
+      const splitDesc = selectedSplit.id === 'custom'
+        ? `Elige el split más adecuado para ${gymDays} días/semana.`
+        : `Split: ${selectedSplit.label} — ${selectedSplit.desc}. Distribuye ${gymDays} días de gym a lo largo de la semana.`
 
       const raw = await callAI(
-        `Eres coach de fitness y nutricionista experto. Crea un plan completo de 7 días.
-Objetivo: ${goalType}. Días de gym: ${gymDays}/semana. Tiempo por sesión: ${workoutTime} min.
-Calorías diarias: ~${targetCals} kcal. Proteína mínima: ${proteinTarget}g/día. Cocina colombiana variada.
-${splitPromptPart}
+        `Eres entrenador y nutricionista. Genera un plan semanal de 7 días en JSON.
+${splitDesc}
+Objetivo: ${goalType}. Peso: ${lastW || 75}kg. Tiempo por sesión: ${workoutTime}min.
+Calorías: ~${targetCals}kcal/día. Proteína mínima: ${proteinTarget}g/día. Comida colombiana.
 
-Responde ÚNICAMENTE con JSON válido, sin markdown ni texto extra:
-{"days":[{"day":"Lunes","isRest":false,"workout":{"name":"Nombre rutina","focus":"grupo muscular del día","exercises":[{"name":"ejercicio","sets":4,"reps":"8-10","notes":"tip técnico"}]},"breakfast":"descripción (~Xcal)","lunch":"descripción (~Xcal)","dinner":"descripción (~Xcal)","snack":"descripción (~Xcal)","totalCals":2200}]}
+Devuelve SOLO el JSON, sin texto adicional ni markdown:
+{"days":[{"day":"Lunes","isRest":false,"workout":{"name":"Pecho y Tríceps","focus":"Empuje superior","exercises":[{"name":"Press de banca","sets":4,"reps":"8-10","notes":"baja controlado"}]},"breakfast":"Avena con banano (~350cal)","lunch":"Arroz, pollo asado, ensalada (~650cal)","dinner":"Sopa de lentejas, pan integral (~400cal)","snack":"Yogur griego con frutas (~200cal)","totalCals":2200}]}
 
-Reglas:
-- Exactamente 7 días (Lunes a Domingo).
-- Si isRest=true, omite workout o ponlo null. Los días de descanso igual tienen plan de comidas.
-- Cada día de gym: 4-6 ejercicios específicos para el grupo muscular asignado.
-- El nombre del workout debe reflejar el grupo muscular (ej: "Piernas — Cuádriceps y Femoral").`,
-        [{ role: 'user', content: `Genera el plan semanal completo para ${lastW || '75'}kg, objetivo: ${goalType}, split: ${selectedSplit?.label}.` }],
-        3000
+Reglas: exactamente 7 días Lunes-Domingo. Si isRest=true pon workout null. Cada día de gym 4-5 ejercicios enfocados en el grupo muscular del split.`,
+        [{ role: 'user', content: `Plan para ${lastW || 75}kg, ${goalType}, ${gymDays} días gym, split ${selectedSplit.label}.` }],
+        4500
       )
-      const parsed = JSON.parse(raw.trim())
+
+      const parsed = JSON.parse(extractJSON(raw))
+      if (!parsed.days || !Array.isArray(parsed.days)) throw new Error('Formato inválido')
+
+      // Save to meal plan
       onSaveMealPlan({ ...(mealPlan || {}), ...parsed, generated: today(), targetCals, splitType, customDays: {} })
-    } catch { setPlanError('Error generando el plan. Intenta de nuevo.') }
+
+      // Also save each gym day's workout as a routine in the RUTINAS tab
+      // First remove any previously plan-generated routines
+      ;(routines || []).filter(r => r.fromPlan).forEach(r => onDeleteRoutine(r.id))
+      // Then add the new ones
+      parsed.days.forEach(day => {
+        if (!day.isRest && day.workout?.exercises?.length > 0) {
+          onSaveRoutine({
+            id: uid(),
+            name: day.workout.name || day.day,
+            exercises: day.workout.exercises.map(ex => ({
+              id: uid(),
+              name: ex.name,
+              sets: parseInt(ex.sets) || 3,
+              reps: ex.reps || '10',
+              weight: '',
+            })),
+            aiGenerated: true,
+            fromPlan: true,
+          })
+        }
+      })
+    } catch (e) {
+      console.error('Plan error:', e)
+      setPlanError('Error generando el plan. Revisa tu conexión e intenta de nuevo.')
+    }
     setLoadingPlan(false)
   }
 
@@ -1664,7 +1686,7 @@ Adapta el plan para incluir lo que el usuario quiere. Ajusta las otras comidas p
         [{ role: 'user', content: `Hoy quiero comer: ${dayMealInput}. Adapta mi día completo.` }],
         700
       )
-      const parsed = JSON.parse(raw.trim())
+      const parsed = JSON.parse(extractJSON(raw))
       onSaveMealPlan({
         ...(mealPlan || {}),
         customDays: { ...(mealPlan?.customDays || {}), [selectedDay]: { ...parsed, custom: true } },
@@ -2290,7 +2312,7 @@ export default function App() {
         {tab === 'rutinas'   && <RoutinesTab routines={routines} goals={goals} onSave={saveRoutine} onDelete={deleteRoutine} />}
         {tab === 'historial' && <HistoryTab logs={logs} />}
         {tab === 'nutricion' && <NutritionTab wLogs={wLogs} nutLogs={nutLogs} goals={goals} onSaveWeight={saveWeight} onSaveNut={saveNut} onDeleteNut={deleteNut} onSaveGoals={saveGoals} />}
-        {tab === 'plan'      && <PlanTab logs={logs} nutLogs={nutLogs} goals={goals} wLogs={wLogs} mealPlan={mealPlan} onSaveMealPlan={saveMealPlan} />}
+        {tab === 'plan'      && <PlanTab logs={logs} nutLogs={nutLogs} goals={goals} wLogs={wLogs} mealPlan={mealPlan} onSaveMealPlan={saveMealPlan} routines={routines} onSaveRoutine={saveRoutine} onDeleteRoutine={deleteRoutine} />}
         {tab === 'progreso'  && <ProgressTab logs={logs} wLogs={wLogs} goals={goals} />}
         {tab === 'coach'     && <CoachTab goals={goals} routines={routines} wLogs={wLogs} />}
       </div>
@@ -2317,5 +2339,3 @@ export default function App() {
     </div>
   )
 }
-
-
