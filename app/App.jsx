@@ -585,15 +585,30 @@ Entre 4 y 8 ejercicios. El campo weight siempre como string vacío "". Tips brev
 
 // ─── TODAY Tab ────────────────────────────────────────────────────────────────
 
-function TodayTab({ routines, logs, goals, wLogs, onSaveLog }) {
+function TodayTab({ routines, logs, goals, wLogs, onSaveLog, mealPlan, nutLogs }) {
   const [session, setSession] = useState(null)
   const [showPicker, setShowPicker] = useState(false)
   const [restTimer, setRestTimer] = useState(null)
   const [restSeconds, setRestSeconds] = useState(60)
   const todayLog = logs.find(l => l.date === today())
-  const todayNut = null // accessed from parent but we just show summary
-  const tdee = calcTDEE(goals, wLogs)
-  const targetCals = parseInt(goals?.targetCals) || tdee
+  const targetCals = parseInt(goals?.targetCals) || calcTDEE(goals, wLogs) || 2000
+
+  // Today's nutrition from logs
+  const todayNuts = (nutLogs || []).filter(n => n.date === today())
+  const nutTotal = todayNuts.reduce((acc, n) => ({
+    calories: (acc.calories || 0) + (parseFloat(n.calories) || 0),
+    protein: (acc.protein || 0) + (parseFloat(n.protein) || 0),
+  }), {})
+
+  // Today's plan (find which index today is in the current week)
+  const getTodayPlanDay = () => {
+    if (!mealPlan?.days) return null
+    const now = new Date()
+    const dayOfWeek = now.getDay()
+    const idx = dayOfWeek === 0 ? 6 : dayOfWeek - 1 // 0=Mon...6=Sun
+    return mealPlan.days[idx] || null
+  }
+  const planToday = getTodayPlanDay()
 
   const startWorkout = (routine) => {
     setSession({
@@ -700,23 +715,24 @@ function TodayTab({ routines, logs, goals, wLogs, onSaveLog }) {
   return (
     <div>
       <div style={{ fontFamily: T.F, fontSize: 30, color: T.text, letterSpacing: 2, marginBottom: 3 }}>HOY</div>
-      <div style={{ fontFamily: T.B, fontSize: 12, color: T.muted, marginBottom: 14 }}>{fdate(today())}</div>
+      <div style={{ fontFamily: T.B, fontSize: 12, color: T.muted, marginBottom: 12 }}>{fdate(today())}</div>
 
-      {/* Stats row */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 6, marginBottom: 11 }}>
+      {/* Goals summary */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 6, marginBottom: 12 }}>
         {[
-          [targetCals ? `${targetCals}` : '—', 'kcal meta', T.orange],
+          [nutTotal.calories ? `${Math.round(nutTotal.calories)}/${targetCals}` : `${targetCals}`, 'kcal hoy', T.orange],
           [goals?.gymDays ? `${goals.gymDays}d` : '—', 'días/sem', T.lime],
-          [goals?.workoutTime ? `${goals.workoutTime}m` : '—', 'min/sesión', T.teal],
+          [goals?.workoutTime ? `${goals.workoutTime}m` : '—', 'min/ses.', T.teal],
         ].map(([val, label, color]) => (
           <Card key={label} style={{ textAlign: 'center', padding: 9 }}>
-            <div style={{ fontFamily: T.F, fontSize: 17, color, letterSpacing: 1 }}>{val}</div>
+            <div style={{ fontFamily: T.F, fontSize: 15, color, letterSpacing: 0.5 }}>{val}</div>
             <div style={{ fontFamily: T.B, fontSize: 9, color: T.muted }}>{label}</div>
           </Card>
         ))}
       </div>
 
-      {todayLog && (
+      {/* Today's workout log */}
+      {todayLog ? (
         <Card style={{ marginBottom: 11, borderColor: `${T.lime}44` }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <div>
@@ -728,35 +744,43 @@ function TodayTab({ routines, logs, goals, wLogs, onSaveLog }) {
             <Tag color={T.lime}>Completado</Tag>
           </div>
         </Card>
-      )}
-
-      {routines.length === 0 ? (
-        <Card style={{ textAlign: 'center', padding: 40 }}>
-          <div style={{ fontSize: 36, marginBottom: 9 }}>🏋️</div>
-          <div style={{ fontFamily: T.B, color: T.muted }}>
-            Crea una rutina en <strong style={{ color: T.text }}>Rutinas</strong> para empezar.
+      ) : planToday && !planToday.isRest && planToday.workout ? (
+        <Card style={{ marginBottom: 11, borderColor: `${T.purple}44` }}>
+          <div style={{ fontFamily: T.M, fontSize: 9, color: T.purple, marginBottom: 4 }}>✨ RUTINA DE HOY (PLAN IA)</div>
+          <div style={{ fontFamily: T.B, fontWeight: 700, color: T.text, fontSize: 13, marginBottom: 3 }}>{planToday.workout.name}</div>
+          {planToday.workout.focus && <div style={{ fontFamily: T.B, fontSize: 10, color: T.muted, marginBottom: 7 }}>{planToday.workout.focus}</div>}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+            {planToday.workout.exercises?.slice(0, 4).map((ex, i) => (
+              <div key={i} style={{ fontFamily: T.B, fontSize: 11, color: T.dim }}>• {ex.name} — {ex.sets}×{ex.reps}</div>
+            ))}
+            {(planToday.workout.exercises?.length || 0) > 4 && (
+              <div style={{ fontFamily: T.B, fontSize: 10, color: T.muted }}>+{planToday.workout.exercises.length - 4} más...</div>
+            )}
           </div>
         </Card>
-      ) : (
+      ) : planToday?.isRest ? (
+        <Card style={{ marginBottom: 11, borderColor: T.border }}>
+          <div style={{ fontFamily: T.B, fontSize: 12, color: T.muted, textAlign: 'center' }}>😴 Hoy es día de descanso según tu plan</div>
+        </Card>
+      ) : null}
+
+      {/* Workout start */}
+      {routines.length > 0 && (
         <>
           <Btn size="lg" style={{ width: '100%', marginBottom: 8 }} onClick={() => setShowPicker(p => !p)}>
             ＋ Iniciar Entrenamiento
           </Btn>
           {showPicker && (
-            <Card style={{ marginTop: 4 }}>
+            <Card style={{ marginBottom: 11 }}>
               <SLabel>Seleccionar rutina</SLabel>
               {routines.map(r => (
-                <button
-                  key={r.id}
-                  onClick={() => startWorkout(r)}
-                  style={{
-                    display: 'block', width: '100%', padding: '10px 12px',
-                    background: T.bg3, border: `1px solid ${T.border}`,
-                    borderRadius: 7, color: T.text, fontFamily: T.B,
-                    fontSize: 13, fontWeight: 500, cursor: 'pointer',
-                    marginBottom: 5, textAlign: 'left', outline: 'none',
-                  }}
-                >
+                <button key={r.id} onClick={() => startWorkout(r)} style={{
+                  display: 'block', width: '100%', padding: '10px 12px',
+                  background: T.bg3, border: `1px solid ${T.border}`,
+                  borderRadius: 7, color: T.text, fontFamily: T.B,
+                  fontSize: 13, fontWeight: 500, cursor: 'pointer',
+                  marginBottom: 5, textAlign: 'left', outline: 'none',
+                }}>
                   <span style={{ color: T.lime, marginRight: 7 }}>▶</span>
                   {r.name}
                   {goals?.workoutTime && <span style={{ float: 'right', color: T.teal, fontSize: 10 }}>~{goals.workoutTime}min</span>}
@@ -766,6 +790,61 @@ function TodayTab({ routines, logs, goals, wLogs, onSaveLog }) {
             </Card>
           )}
         </>
+      )}
+      {routines.length === 0 && !planToday && (
+        <Card style={{ textAlign: 'center', padding: 36, marginBottom: 11 }}>
+          <div style={{ fontSize: 36, marginBottom: 9 }}>🏋️</div>
+          <div style={{ fontFamily: T.B, color: T.muted }}>
+            Ve a <strong style={{ color: T.text }}>Plan</strong> para generar tu semana con IA, o crea una rutina manual en <strong style={{ color: T.text }}>Rutinas</strong>.
+          </div>
+        </Card>
+      )}
+
+      {/* Today's meals from plan */}
+      {planToday && (
+        <Card style={{ marginBottom: 11 }}>
+          <div style={{ fontFamily: T.M, fontSize: 10, color: T.lime, letterSpacing: 1, marginBottom: 8 }}>🍽️ COMIDAS DE HOY</div>
+          {[['🌅', 'Desayuno', planToday.breakfast], ['☀️', 'Almuerzo', planToday.lunch], ['🌙', 'Cena', planToday.dinner], ['🍎', 'Merienda', planToday.snack]].map(([icon, label, text]) => text && (
+            <div key={label} style={{ display: 'flex', gap: 7, padding: '5px 0', borderBottom: `1px solid ${T.border}` }}>
+              <span style={{ fontSize: 13, minWidth: 20 }}>{icon}</span>
+              <span style={{ fontFamily: T.B, fontSize: 10, color: T.muted, minWidth: 60 }}>{label}</span>
+              <span style={{ fontFamily: T.B, fontSize: 11, color: T.dim, flex: 1 }}>{text}</span>
+            </div>
+          ))}
+          {planToday.totalCals && <div style={{ marginTop: 6, textAlign: 'right' }}><Tag color={T.orange}>{planToday.totalCals} kcal</Tag></div>}
+        </Card>
+      )}
+
+      {/* Nutrition logged today summary */}
+      {todayNuts.length > 0 && (
+        <Card>
+          <div style={{ fontFamily: T.M, fontSize: 10, color: T.orange, letterSpacing: 1, marginBottom: 6 }}>📊 REGISTRADO HOY</div>
+          <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
+            <div style={{ flex: 1, background: T.bg3, borderRadius: 6, padding: '6px 8px', textAlign: 'center' }}>
+              <div style={{ fontFamily: T.M, fontSize: 14, fontWeight: 700, color: T.orange }}>{Math.round(nutTotal.calories || 0)}</div>
+              <div style={{ fontFamily: T.B, fontSize: 9, color: T.muted }}>kcal</div>
+            </div>
+            <div style={{ flex: 1, background: T.bg3, borderRadius: 6, padding: '6px 8px', textAlign: 'center' }}>
+              <div style={{ fontFamily: T.M, fontSize: 14, fontWeight: 700, color: T.lime }}>{Math.round(nutTotal.protein || 0)}g</div>
+              <div style={{ fontFamily: T.B, fontSize: 9, color: T.muted }}>proteína</div>
+            </div>
+            {targetCals && <div style={{ flex: 1, background: T.bg3, borderRadius: 6, padding: '6px 8px', textAlign: 'center' }}>
+              <div style={{ fontFamily: T.M, fontSize: 14, fontWeight: 700, color: targetCals - (nutTotal.calories || 0) > 0 ? T.teal : T.red }}>
+                {Math.abs(Math.round(targetCals - (nutTotal.calories || 0)))}
+              </div>
+              <div style={{ fontFamily: T.B, fontSize: 9, color: T.muted }}>{targetCals - (nutTotal.calories || 0) > 0 ? 'restante' : 'exceso'}</div>
+            </div>}
+          </div>
+          {todayNuts.map(n => (
+            <div key={n.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '3px 0', borderBottom: `1px solid ${T.border}` }}>
+              <span style={{ fontFamily: T.B, fontSize: 11, color: T.muted }}>{n.meal || 'Comida'}</span>
+              <div style={{ display: 'flex', gap: 4 }}>
+                {n.calories && <Tag color={T.orange}>{Math.round(n.calories)} kcal</Tag>}
+                {n.protein && <Tag color={T.lime}>{Math.round(n.protein)}g P</Tag>}
+              </div>
+            </div>
+          ))}
+        </Card>
       )}
     </div>
   )
@@ -1044,57 +1123,69 @@ Basa targetCals y targetProtein en el peso actual si se menciona${lastW ? ` (pes
 
 // ─── NUTRITION Tab ────────────────────────────────────────────────────────────
 
-function NutritionTab({ wLogs, nutLogs, goals, onSaveWeight, onSaveNut, onSaveGoals }) {
+function NutritionTab({ wLogs, nutLogs, goals, onSaveWeight, onSaveNut, onDeleteNut, onSaveGoals }) {
   const [wVal, setWVal] = useState('')
-  const [inputMode, setInputMode] = useState('text') // 'text' | 'photo'
+  const [inputMode, setInputMode] = useState('text')
+  const [mealType, setMealType] = useState('Almuerzo')
   const [showManual, setShowManual] = useState(false)
   const [manualNut, setManualNut] = useState({ calories: '', protein: '', carbs: '', fat: '' })
-  const [showGoals, setShowGoals] = useState(false)
+  const [showProfile, setShowProfile] = useState(false)
   const [goalsEdit, setGoalsEdit] = useState({})
   const [showWizard, setShowWizard] = useState(false)
-  const todayNut = nutLogs.find(n => n.date === today())
-  const tdee = calcTDEE(goals, wLogs)
-  const targetCals = parseInt(goals?.targetCals) || tdee || 2000
-  const targetProtein = parseInt(goals?.targetProtein) || 150
 
-  const tdeePreview = calcTDEE(goalsEdit, wLogs)
+  const MEAL_TYPES = ['Desayuno', 'Almuerzo', 'Cena', 'Merienda', 'Extra']
+
+  // Accumulate all today's meals
+  const todayNuts = nutLogs.filter(n => n.date === today())
+  const todayTotals = todayNuts.reduce((acc, n) => ({
+    calories: (acc.calories || 0) + (parseFloat(n.calories) || 0),
+    protein: (acc.protein || 0) + (parseFloat(n.protein) || 0),
+    carbs: (acc.carbs || 0) + (parseFloat(n.carbs) || 0),
+    fat: (acc.fat || 0) + (parseFloat(n.fat) || 0),
+  }), {})
+
+  const targetCals = parseInt(goals?.targetCals) || 2000
+  const targetProtein = parseInt(goals?.targetProtein) || 150
+  const maintCals = calcTDEE(goals, wLogs)
+  const maintPreview = calcTDEE(goalsEdit, wLogs)
+
+  const handleSaveNut = (data) => onSaveNut({ ...data, meal: mealType, id: uid(), date: today() })
 
   const MacroBar = ({ val, max, color }) => (
-    <div style={{ background: T.bg3, borderRadius: 3, height: 4, marginTop: 4 }}>
-      <div style={{ background: color, height: 4, borderRadius: 3, width: `${Math.min(100, (parseFloat(val) / max) * 100)}%`, transition: 'width 0.4s' }} />
+    <div style={{ background: T.bg4, borderRadius: 3, height: 4, marginTop: 3 }}>
+      <div style={{ background: color, height: 4, borderRadius: 3, width: `${Math.min(100, (val / max) * 100)}%`, transition: 'width 0.5s' }} />
     </div>
   )
 
   const handleNotifRequest = async () => {
     if (!('Notification' in window)) return
     const p = await Notification.requestPermission()
-    if (p === 'granted') {
-      new Notification('FitTrack 💪', { body: '¡Notificaciones activadas! Te recordaré entrenar.' })
-    }
+    if (p === 'granted') new Notification('FitTrack 💪', { body: '¡Notificaciones activadas! Te recordaré entrenar.' })
   }
 
   return (
     <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-        <div style={{ fontFamily: T.F, fontSize: 30, color: T.text, letterSpacing: 2 }}>NUTRICIÓN</div>
-        <Btn size="sm" variant="dark" onClick={() => { setGoalsEdit({ ...goals }); setShowGoals(true) }}>🎯 Perfil</Btn>
-      </div>
+      <div style={{ fontFamily: T.F, fontSize: 30, color: T.text, letterSpacing: 2, marginBottom: 12 }}>NUTRICIÓN</div>
 
-      {/* TDEE / Goals bar */}
-      {(tdee || goals?.targetCals) && (
-        <Card style={{ marginBottom: 11, borderColor: `${T.orange}33` }}>
-          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
-            {tdee && <span style={{ fontFamily: T.B, fontSize: 11 }}>⚡ TDEE: <span style={{ color: T.orange, fontWeight: 700 }}>{tdee} kcal</span></span>}
-            {goals?.targetCals && <span style={{ fontFamily: T.B, fontSize: 11 }}>🎯 Meta: <span style={{ color: T.lime }}>{goals.targetCals} kcal</span></span>}
-            {goals?.targetWeight && <span style={{ fontFamily: T.B, fontSize: 11 }}>⚖️ <span style={{ color: T.teal }}>{goals.targetWeight} kg meta</span></span>}
-            {goals?.gymDays && <span style={{ fontFamily: T.B, fontSize: 11 }}>📅 <span style={{ color: T.lime }}>{goals.gymDays}/sem</span></span>}
-          </div>
-        </Card>
+      {/* Goals summary bar */}
+      {(goals?.targetCals || goals?.targetProtein) && (
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 6, marginBottom: 12 }}>
+          {[
+            [`${Math.round(todayTotals.calories || 0)}/${targetCals}`, 'kcal hoy', T.orange],
+            [`${Math.round(todayTotals.protein || 0)}/${targetProtein}g`, 'proteína', T.lime],
+            [goals?.targetWeight ? `${goals.targetWeight} kg` : (goals?.goalType === 'lose' ? 'Bajar' : goals?.goalType === 'gain' ? 'Ganar' : 'Manten.'), 'objetivo', T.purple],
+          ].map(([val, label, color]) => (
+            <Card key={label} style={{ textAlign: 'center', padding: '8px 5px' }}>
+              <div style={{ fontFamily: T.M, fontSize: 11, fontWeight: 700, color }}>{val}</div>
+              <div style={{ fontFamily: T.B, fontSize: 9, color: T.muted }}>{label}</div>
+            </Card>
+          ))}
+        </div>
       )}
 
       {/* Weight */}
       <div style={{ fontFamily: T.F, fontSize: 15, color: T.teal, letterSpacing: 1, marginBottom: 7 }}>PESO CORPORAL</div>
-      <Card style={{ marginBottom: 11 }}>
+      <Card style={{ marginBottom: 12 }}>
         <div style={{ display: 'flex', gap: 7, alignItems: 'flex-end', marginBottom: wLogs.length ? 10 : 0 }}>
           <div style={{ flex: 1 }}>
             <SLabel>Registrar hoy</SLabel>
@@ -1102,113 +1193,280 @@ function NutritionTab({ wLogs, nutLogs, goals, onSaveWeight, onSaveNut, onSaveGo
           </div>
           <Btn onClick={() => { if (wVal) { onSaveWeight(parseFloat(wVal)); setWVal('') } }}>Guardar</Btn>
         </div>
-        {[...wLogs].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 4).map(w => (
+        {[...wLogs].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 3).map(w => (
           <div key={w.id || w.date} style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0', borderBottom: `1px solid ${T.border}` }}>
             <span style={{ fontFamily: T.B, fontSize: 11, color: T.muted }}>{fdate(w.date)}</span>
             <span style={{ fontFamily: T.M, fontSize: 12, color: T.text, fontWeight: 700 }}>{w.weight} kg</span>
           </div>
         ))}
-        {wLogs.length === 0 && <p style={{ fontFamily: T.B, fontSize: 12, color: T.muted, textAlign: 'center', padding: 8 }}>Sin registros aún</p>}
+        {wLogs.length === 0 && <p style={{ fontFamily: T.B, fontSize: 11, color: T.muted, textAlign: 'center', padding: 6 }}>Sin registros aún</p>}
       </Card>
 
       {/* Nutrition today */}
-      <div style={{ fontFamily: T.F, fontSize: 15, color: T.lime, letterSpacing: 1, marginBottom: 7 }}>NUTRICIÓN HOY</div>
-      {todayNut ? (
-        <Card style={{ marginBottom: 11 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-            <p style={{ fontFamily: T.B, fontSize: 12, color: T.dim, fontStyle: 'italic', flex: 1 }}>"{todayNut.notes || 'Sin notas'}"</p>
-            {todayNut.aiGenerated && <Tag color={T.purple}>IA</Tag>}
-          </div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, marginBottom: 8 }}>
+      <div style={{ fontFamily: T.F, fontSize: 15, color: T.lime, letterSpacing: 1, marginBottom: 7 }}>COMIDAS DE HOY</div>
+
+      {/* Accumulated totals */}
+      {todayNuts.length > 0 && (
+        <Card style={{ marginBottom: 10 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 5, marginBottom: 10 }}>
             {[
-              ['🔥 Cal', todayNut.calories, 'kcal', T.orange, targetCals],
-              ['💪 Prot', todayNut.protein, 'g', T.lime, targetProtein],
-              ['🌾 Carbos', todayNut.carbs, 'g', T.blue, 300],
-              ['🥑 Grasa', todayNut.fat, 'g', T.orange, 80],
+              ['Cal', Math.round(todayTotals.calories), 'kcal', T.orange, targetCals],
+              ['Prot', Math.round(todayTotals.protein), 'g', T.lime, targetProtein],
+              ['Carbs', Math.round(todayTotals.carbs), 'g', T.blue, 300],
+              ['Grasa', Math.round(todayTotals.fat), 'g', '#ef9a9a', 80],
             ].map(([label, val, unit, color, max]) => (
-              <div key={label} style={{ background: T.bg3, borderRadius: 6, padding: 8 }}>
-                <div style={{ fontSize: 10, color: T.muted, fontFamily: T.B }}>{label}</div>
-                <div style={{ fontFamily: T.M, fontSize: 13, fontWeight: 700, color }}>
-                  {val || '—'}<span style={{ fontSize: 9, color: T.muted }}> {unit}</span>
-                </div>
-                {val && max && <MacroBar val={val} max={max} color={color} />}
+              <div key={label} style={{ background: T.bg3, borderRadius: 6, padding: '6px 5px', textAlign: 'center' }}>
+                <div style={{ fontFamily: T.B, fontSize: 9, color: T.muted }}>{label}</div>
+                <div style={{ fontFamily: T.M, fontSize: 12, fontWeight: 700, color }}>{val}<span style={{ fontSize: 8, color: T.muted }}>{unit}</span></div>
+                {max && <MacroBar val={val} max={max} color={color} />}
               </div>
             ))}
           </div>
-          {todayNut.calories && targetCals && (
-            <div style={{ background: T.bg3, borderRadius: 6, padding: 8, textAlign: 'center' }}>
-              <span style={{ fontFamily: T.B, fontSize: 11, color: T.muted }}>Restante: </span>
-              <span style={{ fontFamily: T.M, fontSize: 13, fontWeight: 700, color: targetCals - todayNut.calories > 0 ? T.lime : T.red }}>
-                {Math.abs(targetCals - todayNut.calories)} kcal {targetCals - todayNut.calories > 0 ? 'por consumir' : 'de exceso'}
+          {targetCals && (
+            <div style={{ textAlign: 'center', marginBottom: 8 }}>
+              <span style={{ fontFamily: T.B, fontSize: 11, color: T.muted }}>
+                {targetCals - todayTotals.calories > 0
+                  ? <><span style={{ color: T.lime, fontWeight: 700 }}>{Math.round(targetCals - todayTotals.calories)} kcal</span> restantes</>
+                  : <><span style={{ color: T.red, fontWeight: 700 }}>{Math.round(todayTotals.calories - targetCals)} kcal</span> de exceso</>
+                }
               </span>
             </div>
           )}
-        </Card>
-      ) : (
-        <Card style={{ marginBottom: 11 }}>
-          {/* Input mode toggle */}
-          <div style={{ display: 'flex', gap: 0, marginBottom: 14, background: T.bg3, borderRadius: 7, padding: 3 }}>
-            {[['text', '✍️ Texto'], ['photo', '📷 Foto']].map(([mode, label]) => (
-              <button
-                key={mode}
-                onClick={() => setInputMode(mode)}
-                style={{
-                  flex: 1, padding: '6px 0', borderRadius: 5, border: 'none',
-                  background: inputMode === mode ? T.bg2 : 'transparent',
-                  color: inputMode === mode ? T.lime : T.muted,
-                  fontFamily: T.B, fontSize: 12, fontWeight: 600, cursor: 'pointer',
-                  outline: 'none', transition: 'all 0.15s',
-                }}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-
-          {inputMode === 'text' ? (
-            <AINutrition onSave={onSaveNut} />
-          ) : (
-            <PhotoNutrition onSave={onSaveNut} />
-          )}
-
-          <div style={{ borderTop: `1px solid ${T.border}`, margin: '12px 0 10px' }} />
-          {!showManual ? (
-            <button onClick={() => setShowManual(true)} style={{ background: 'none', border: 'none', color: T.muted, fontFamily: T.B, fontSize: 11, cursor: 'pointer', padding: 0 }}>
-              ↳ Ingresar macros manualmente
-            </button>
-          ) : (
-            <div>
-              <SLabel>Ingreso manual</SLabel>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, marginBottom: 8 }}>
-                {[['Calorías', 'calories', 'kcal'], ['Proteína', 'protein', 'g'], ['Carbos', 'carbs', 'g'], ['Grasa', 'fat', 'g']].map(([label, field, unit]) => (
-                  <div key={field}>
-                    <div style={{ fontSize: 9, color: T.muted, fontFamily: T.M, marginBottom: 2 }}>{label}</div>
-                    <NumInput value={manualNut[field]} onChange={v => setManualNut(n => ({ ...n, [field]: v }))} unit={unit} style={{ textAlign: 'center', fontSize: 12 }} />
-                  </div>
-                ))}
+          {/* Individual meals */}
+          {todayNuts.map(n => (
+            <div key={n.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '5px 0', borderTop: `1px solid ${T.border}` }}>
+              <div>
+                <span style={{ fontFamily: T.B, fontSize: 12, color: T.text }}>{n.meal || 'Comida'}</span>
+                {n.notes && <span style={{ fontFamily: T.B, fontSize: 10, color: T.muted }}> · {n.notes.slice(0, 30)}</span>}
               </div>
-              <div style={{ display: 'flex', gap: 6 }}>
-                <Btn size="sm" style={{ flex: 1 }} onClick={() => { onSaveNut({ id: uid(), date: today(), ...manualNut }); setShowManual(false) }}>Guardar</Btn>
-                <Btn size="sm" variant="dark" onClick={() => setShowManual(false)}>Cancelar</Btn>
-              </div>
-            </div>
-          )}
-        </Card>
-      )}
-
-      {/* Nutrition history */}
-      {nutLogs.length > 1 && (
-        <Card>
-          <div style={{ fontFamily: T.F, fontSize: 13, color: T.muted, letterSpacing: 1, marginBottom: 7 }}>HISTORIAL NUTRICIÓN</div>
-          {[...nutLogs].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 6).map(n => (
-            <div key={n.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '5px 0', borderBottom: `1px solid ${T.border}` }}>
-              <span style={{ fontFamily: T.B, fontSize: 11, color: T.muted }}>{fdate(n.date)}</span>
-              <div style={{ display: 'flex', gap: 4 }}>
-                {n.calories && <Tag color={T.orange}>{n.calories} kcal</Tag>}
-                {n.protein && <Tag color={T.lime}>{n.protein}g P</Tag>}
+              <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+                {n.calories && <Tag color={T.orange}>{Math.round(n.calories)} kcal</Tag>}
+                {n.protein && <Tag color={T.lime}>{Math.round(n.protein)}g</Tag>}
+                <button onClick={() => onDeleteNut(n.id)} style={{ background: 'none', border: 'none', color: T.muted, cursor: 'pointer', fontSize: 13, padding: '0 2px', lineHeight: 1 }}>✕</button>
               </div>
             </div>
           ))}
+        </Card>
+      )}
+
+      {/* Add meal card */}
+      <Card style={{ marginBottom: 12 }}>
+        {/* Meal type selector */}
+        <div style={{ display: 'flex', gap: 4, marginBottom: 11, flexWrap: 'wrap' }}>
+          {MEAL_TYPES.map(m => (
+            <button key={m} onClick={() => setMealType(m)} style={{
+              padding: '4px 10px', borderRadius: 20, border: `1px solid ${mealType === m ? T.lime : T.border}`,
+              background: mealType === m ? `${T.lime}18` : T.bg3,
+              color: mealType === m ? T.lime : T.muted,
+              fontFamily: T.B, fontSize: 11, cursor: 'pointer', outline: 'none',
+            }}>{m}</button>
+          ))}
+        </div>
+
+        {/* Input mode toggle */}
+        <div style={{ display: 'flex', gap: 0, marginBottom: 12, background: T.bg3, borderRadius: 7, padding: 3 }}>
+          {[['text', '✍️ Texto / IA'], ['photo', '📷 Foto']].map(([mode, label]) => (
+            <button key={mode} onClick={() => setInputMode(mode)} style={{
+              flex: 1, padding: '6px 0', borderRadius: 5, border: 'none',
+              background: inputMode === mode ? T.bg2 : 'transparent',
+              color: inputMode === mode ? T.lime : T.muted,
+              fontFamily: T.B, fontSize: 12, fontWeight: 600, cursor: 'pointer',
+              outline: 'none', transition: 'all 0.15s',
+            }}>{label}</button>
+          ))}
+        </div>
+
+        {inputMode === 'text' ? (
+          <AINutrition onSave={handleSaveNut} />
+        ) : (
+          <PhotoNutrition onSave={handleSaveNut} />
+        )}
+
+        <div style={{ borderTop: `1px solid ${T.border}`, margin: '10px 0 8px' }} />
+        {!showManual ? (
+          <button onClick={() => setShowManual(true)} style={{ background: 'none', border: 'none', color: T.muted, fontFamily: T.B, fontSize: 11, cursor: 'pointer', padding: 0 }}>
+            ↳ Ingresar macros manualmente
+          </button>
+        ) : (
+          <div>
+            <SLabel>Ingreso manual</SLabel>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, marginBottom: 8 }}>
+              {[['Calorías', 'calories', 'kcal'], ['Proteína', 'protein', 'g'], ['Carbos', 'carbs', 'g'], ['Grasa', 'fat', 'g']].map(([label, field, unit]) => (
+                <div key={field}>
+                  <div style={{ fontSize: 9, color: T.muted, fontFamily: T.M, marginBottom: 2 }}>{label}</div>
+                  <NumInput value={manualNut[field]} onChange={v => setManualNut(n => ({ ...n, [field]: v }))} unit={unit} style={{ textAlign: 'center', fontSize: 12 }} />
+                </div>
+              ))}
+            </div>
+            <div style={{ display: 'flex', gap: 6 }}>
+              <Btn size="sm" style={{ flex: 1 }} onClick={() => {
+                onSaveNut({ id: uid(), date: today(), meal: mealType, ...manualNut })
+                setManualNut({ calories: '', protein: '', carbs: '', fat: '' })
+                setShowManual(false)
+              }}>Guardar {mealType}</Btn>
+              <Btn size="sm" variant="dark" onClick={() => setShowManual(false)}>Cancelar</Btn>
+            </div>
+          </div>
+        )}
+      </Card>
+
+      {/* Nutrition history (past days) */}
+      {nutLogs.filter(n => n.date !== today()).length > 0 && (
+        <Card style={{ marginBottom: 12 }}>
+          <div style={{ fontFamily: T.F, fontSize: 13, color: T.muted, letterSpacing: 1, marginBottom: 7 }}>HISTORIAL</div>
+          {Object.entries(
+            nutLogs.filter(n => n.date !== today()).reduce((acc, n) => {
+              if (!acc[n.date]) acc[n.date] = { calories: 0, protein: 0 }
+              acc[n.date].calories += parseFloat(n.calories) || 0
+              acc[n.date].protein += parseFloat(n.protein) || 0
+              return acc
+            }, {})
+          ).sort(([a], [b]) => b.localeCompare(a)).slice(0, 5).map(([date, totals]) => (
+            <div key={date} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '5px 0', borderBottom: `1px solid ${T.border}` }}>
+              <span style={{ fontFamily: T.B, fontSize: 11, color: T.muted }}>{fdate(date)}</span>
+              <div style={{ display: 'flex', gap: 4 }}>
+                {totals.calories > 0 && <Tag color={T.orange}>{Math.round(totals.calories)} kcal</Tag>}
+                {totals.protein > 0 && <Tag color={T.lime}>{Math.round(totals.protein)}g P</Tag>}
+              </div>
+            </div>
+          ))}
+        </Card>
+      )}
+
+      {/* ── PERFIL Y METAS (sub-sección inferior) ── */}
+      <button
+        onClick={() => { setGoalsEdit({ ...goals }); setShowProfile(p => !p) }}
+        style={{
+          width: '100%', background: showProfile ? T.bg3 : T.bg2,
+          border: `1px solid ${showProfile ? T.borderL : T.border}`,
+          borderRadius: 10, padding: '11px 14px', cursor: 'pointer',
+          display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+          marginBottom: showProfile ? 0 : 8, outline: 'none',
+        }}
+      >
+        <span style={{ fontFamily: T.F, fontSize: 16, color: showProfile ? T.lime : T.muted, letterSpacing: 1 }}>⚙️ PERFIL Y METAS</span>
+        <span style={{ color: T.muted, fontSize: 14 }}>{showProfile ? '▲' : '▼'}</span>
+      </button>
+
+      {showProfile && (
+        <Card style={{ borderTopLeftRadius: 0, borderTopRightRadius: 0, borderTop: 'none', marginBottom: 8 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+
+            <div style={{ background: `${T.purple}15`, border: `1px solid ${T.purple}44`, borderRadius: 8, padding: 11 }}>
+              <div style={{ fontFamily: T.B, fontSize: 12, color: T.text, marginBottom: 6 }}>¿No sabes cuántas calorías o proteína necesitas?</div>
+              <Btn variant="ai" size="sm" style={{ width: '100%' }} onClick={() => setShowWizard(true)}>
+                ✨ Calcular con IA — dime tu objetivo
+              </Btn>
+            </div>
+
+            <div style={{ fontFamily: T.F, fontSize: 13, color: T.teal, letterSpacing: 1 }}>DATOS PERSONALES</div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+              <div><SLabel>Estatura</SLabel><NumInput value={goalsEdit.height || ''} onChange={v => setGoalsEdit(g => ({ ...g, height: v }))} placeholder="175" unit="cm" /></div>
+              <div><SLabel>Edad</SLabel><NumInput value={goalsEdit.age || ''} onChange={v => setGoalsEdit(g => ({ ...g, age: v }))} placeholder="25" unit="años" /></div>
+            </div>
+
+            <div>
+              <SLabel>Género</SLabel>
+              <div style={{ display: 'flex', gap: 6 }}>
+                {[['m', '♂ Hombre'], ['f', '♀ Mujer']].map(([val, label]) => (
+                  <button key={val} onClick={() => setGoalsEdit(g => ({ ...g, gender: val }))} style={{
+                    flex: 1, padding: '7px 0', borderRadius: 6, cursor: 'pointer',
+                    background: goalsEdit.gender === val ? T.lime : T.bg3,
+                    color: goalsEdit.gender === val ? '#000' : T.muted,
+                    border: `1px solid ${goalsEdit.gender === val ? T.lime : T.border}`,
+                    fontFamily: T.B, fontSize: 12, fontWeight: 600, outline: 'none',
+                  }}>{label}</button>
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <SLabel>Nivel de actividad</SLabel>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                {[
+                  ['sedentary', 'Sedentario — Poco ejercicio'],
+                  ['light', 'Ligero — 1-3 días/semana'],
+                  ['moderate', 'Moderado — 3-5 días/semana'],
+                  ['very', 'Muy activo — 6-7 días/semana'],
+                  ['extra', 'Extra activo — Doble entreno'],
+                ].map(([val, label]) => (
+                  <button key={val} onClick={() => setGoalsEdit(g => ({ ...g, activityLevel: val }))} style={{
+                    padding: '7px 10px', borderRadius: 6, cursor: 'pointer', textAlign: 'left',
+                    background: goalsEdit.activityLevel === val ? `${T.lime}20` : T.bg3,
+                    color: goalsEdit.activityLevel === val ? T.lime : T.muted,
+                    border: `1px solid ${goalsEdit.activityLevel === val ? T.lime : T.border}`,
+                    fontFamily: T.B, fontSize: 11, outline: 'none',
+                  }}>{label}</button>
+                ))}
+              </div>
+            </div>
+
+            {maintPreview && (
+              <div style={{ background: `${T.orange}11`, border: `1px solid ${T.orange}33`, borderRadius: 7, padding: 10 }}>
+                <div style={{ fontFamily: T.B, fontSize: 12, color: T.orange }}>
+                  🔥 Calorías de mantenimiento: <strong>{maintPreview} kcal/día</strong>
+                </div>
+                <div style={{ fontFamily: T.B, fontSize: 10, color: T.muted, marginTop: 3 }}>
+                  Bajar ~0.5kg/sem: {maintPreview - 500} kcal · Ganar masa: {maintPreview + 300} kcal
+                </div>
+              </div>
+            )}
+
+            <div style={{ borderTop: `1px solid ${T.border}`, paddingTop: 6 }} />
+            <div style={{ fontFamily: T.F, fontSize: 13, color: T.lime, letterSpacing: 1 }}>METAS</div>
+
+            <div>
+              <SLabel>Objetivo</SLabel>
+              <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                {[['lose', '📉 Bajar peso'], ['maintain', '⚖️ Mantener'], ['gain', '📈 Ganar músculo']].map(([val, label]) => (
+                  <button key={val} onClick={() => {
+                    const lastWVal = [...(wLogs || [])].sort((a, b) => b.date.localeCompare(a.date))[0]?.weight
+                    const wKg = parseFloat(lastWVal) || 75
+                    const suggestedCals = maintPreview
+                      ? val === 'lose' ? maintPreview - 500 : val === 'gain' ? maintPreview + 300 : maintPreview
+                      : undefined
+                    const suggestedProtein = val === 'gain' ? Math.round(wKg * 2.2) : val === 'lose' ? Math.round(wKg * 2) : Math.round(wKg * 1.8)
+                    setGoalsEdit(g => ({
+                      ...g, goalType: val,
+                      ...(suggestedCals ? { targetCals: String(suggestedCals) } : {}),
+                      targetProtein: String(suggestedProtein),
+                    }))
+                  }} style={{
+                    flex: 1, padding: '7px 6px', borderRadius: 6, cursor: 'pointer',
+                    background: goalsEdit.goalType === val ? `${T.purple}30` : T.bg3,
+                    color: goalsEdit.goalType === val ? T.purple : T.muted,
+                    border: `1px solid ${goalsEdit.goalType === val ? T.purple : T.border}`,
+                    fontFamily: T.B, fontSize: 11, fontWeight: 600, outline: 'none',
+                  }}>{label}</button>
+                ))}
+              </div>
+            </div>
+
+            {[
+              ['Peso objetivo', 'targetWeight', 'kg', '72'],
+              ['Calorías diarias', 'targetCals', 'kcal', maintPreview ? String(maintPreview) : '2500'],
+              ['Proteína diaria', 'targetProtein', 'g', '150'],
+              ['Días de gym/sem', 'gymDays', 'días', '4'],
+              ['Tiempo/sesión', 'workoutTime', 'min', '60'],
+            ].map(([label, field, unit, ph]) => (
+              <div key={field}>
+                <SLabel>{label}</SLabel>
+                <NumInput value={goalsEdit[field] || ''} onChange={v => setGoalsEdit(g => ({ ...g, [field]: v }))} placeholder={ph} unit={unit} />
+              </div>
+            ))}
+
+            <div style={{ borderTop: `1px solid ${T.border}`, paddingTop: 6 }} />
+            <div style={{ fontFamily: T.F, fontSize: 13, color: T.purple, letterSpacing: 1 }}>RECORDATORIO</div>
+            <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+              <input type="time" value={goalsEdit.reminderTime || ''} onChange={e => setGoalsEdit(g => ({ ...g, reminderTime: e.target.value }))}
+                style={{ flex: 1, background: T.bg3, border: `1px solid ${T.border}`, borderRadius: 6, color: T.text, fontFamily: T.M, fontSize: 13, padding: '7px 9px', outline: 'none' }} />
+              <Btn size="sm" variant="dark" onClick={handleNotifRequest}>🔔 Activar</Btn>
+            </div>
+
+            <Btn size="lg" style={{ width: '100%', marginTop: 4 }} onClick={() => { onSaveGoals(goalsEdit); setShowProfile(false) }}>
+              Guardar Perfil y Metas
+            </Btn>
+          </div>
         </Card>
       )}
 
@@ -1216,161 +1474,9 @@ function NutritionTab({ wLogs, nutLogs, goals, onSaveWeight, onSaveNut, onSaveGo
       <Modal open={showWizard} onClose={() => setShowWizard(false)} title="✨ Asistente de Metas IA">
         <AIGoalWizard
           wLogs={wLogs}
-          onApply={reco => setGoalsEdit(g => ({ ...g, ...reco }))}
+          onApply={reco => { setGoalsEdit(g => ({ ...g, ...reco })); setShowWizard(false) }}
           onClose={() => setShowWizard(false)}
         />
-      </Modal>
-
-      {/* Profile + Goals modal */}
-      <Modal open={showGoals} onClose={() => setShowGoals(false)} title="🎯 Perfil y Metas">
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-
-          {/* Wizard entry point */}
-          <div style={{ background: `${T.purple}15`, border: `1px solid ${T.purple}44`, borderRadius: 8, padding: 12 }}>
-            <div style={{ fontFamily: T.B, fontSize: 12, color: T.text, marginBottom: 6 }}>
-              ¿No sabes cuántas calorías o proteína necesitas?
-            </div>
-            <Btn variant="ai" size="sm" style={{ width: '100%' }} onClick={() => { setShowGoals(false); setShowWizard(true) }}>
-              ✨ Calcular con IA — dime tu objetivo
-            </Btn>
-          </div>
-
-          <div style={{ fontFamily: T.F, fontSize: 13, color: T.teal, letterSpacing: 1, marginBottom: 2 }}>DATOS PERSONALES</div>
-
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-            <div>
-              <SLabel>Estatura</SLabel>
-              <NumInput value={goalsEdit.height || ''} onChange={v => setGoalsEdit(g => ({ ...g, height: v }))} placeholder="175" unit="cm" />
-            </div>
-            <div>
-              <SLabel>Edad</SLabel>
-              <NumInput value={goalsEdit.age || ''} onChange={v => setGoalsEdit(g => ({ ...g, age: v }))} placeholder="25" unit="años" />
-            </div>
-          </div>
-
-          <div>
-            <SLabel>Género</SLabel>
-            <div style={{ display: 'flex', gap: 6 }}>
-              {[['m', '♂ Hombre'], ['f', '♀ Mujer']].map(([val, label]) => (
-                <button
-                  key={val}
-                  onClick={() => setGoalsEdit(g => ({ ...g, gender: val }))}
-                  style={{
-                    flex: 1, padding: '7px 0', borderRadius: 6, cursor: 'pointer',
-                    background: goalsEdit.gender === val ? T.lime : T.bg3,
-                    color: goalsEdit.gender === val ? '#000' : T.muted,
-                    border: `1px solid ${goalsEdit.gender === val ? T.lime : T.border}`,
-                    fontFamily: T.B, fontSize: 12, fontWeight: 600, outline: 'none',
-                  }}
-                >{label}</button>
-              ))}
-            </div>
-          </div>
-
-          <div>
-            <SLabel>Nivel de actividad</SLabel>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-              {[
-                ['sedentary', 'Sedentario — Poco o ningún ejercicio'],
-                ['light', 'Ligero — 1-3 días/semana'],
-                ['moderate', 'Moderado — 3-5 días/semana'],
-                ['very', 'Muy activo — 6-7 días/semana'],
-                ['extra', 'Extra activo — Físico + doble entreno'],
-              ].map(([val, label]) => (
-                <button
-                  key={val}
-                  onClick={() => setGoalsEdit(g => ({ ...g, activityLevel: val }))}
-                  style={{
-                    padding: '7px 10px', borderRadius: 6, cursor: 'pointer', textAlign: 'left',
-                    background: goalsEdit.activityLevel === val ? `${T.lime}20` : T.bg3,
-                    color: goalsEdit.activityLevel === val ? T.lime : T.muted,
-                    border: `1px solid ${goalsEdit.activityLevel === val ? T.lime : T.border}`,
-                    fontFamily: T.B, fontSize: 11, outline: 'none',
-                  }}
-                >{label}</button>
-              ))}
-            </div>
-          </div>
-
-          {/* TDEE preview */}
-          {tdeePreview && (
-            <div style={{ background: `${T.orange}11`, border: `1px solid ${T.orange}33`, borderRadius: 7, padding: 10 }}>
-              <div style={{ fontFamily: T.B, fontSize: 12, color: T.orange }}>
-                ⚡ TDEE estimado: <strong>{tdeePreview} kcal/día</strong>
-              </div>
-              <div style={{ fontFamily: T.B, fontSize: 10, color: T.muted, marginTop: 3 }}>
-                Mantenimiento. Para bajar ~0.5kg/sem: {tdeePreview - 500} kcal · Para subir masa: {tdeePreview + 300} kcal
-              </div>
-            </div>
-          )}
-
-          <div style={{ borderTop: `1px solid ${T.border}`, paddingTop: 6 }} />
-          <div style={{ fontFamily: T.F, fontSize: 13, color: T.lime, letterSpacing: 1 }}>METAS</div>
-
-          <div>
-            <SLabel>Objetivo</SLabel>
-            <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-              {[['lose', '📉 Bajar peso'], ['maintain', '⚖️ Mantener'], ['gain', '📈 Ganar músculo']].map(([val, label]) => (
-                <button
-                  key={val}
-                  onClick={() => {
-                    const newGoal = val
-                    const suggestedCals = tdeePreview
-                      ? val === 'lose' ? tdeePreview - 500 : val === 'gain' ? tdeePreview + 300 : tdeePreview
-                      : undefined
-                    setGoalsEdit(g => ({ ...g, goalType: newGoal, ...(suggestedCals ? { targetCals: String(suggestedCals) } : {}) }))
-                  }}
-                  style={{
-                    flex: 1, padding: '7px 6px', borderRadius: 6, cursor: 'pointer',
-                    background: goalsEdit.goalType === val ? `${T.purple}30` : T.bg3,
-                    color: goalsEdit.goalType === val ? T.purple : T.muted,
-                    border: `1px solid ${goalsEdit.goalType === val ? T.purple : T.border}`,
-                    fontFamily: T.B, fontSize: 11, fontWeight: 600, outline: 'none',
-                  }}
-                >{label}</button>
-              ))}
-            </div>
-          </div>
-
-          {[
-            ['Peso objetivo', 'targetWeight', 'kg', '72'],
-            ['Calorías diarias', 'targetCals', 'kcal', tdeePreview ? String(tdeePreview) : '2500'],
-            ['Proteína diaria', 'targetProtein', 'g', '150'],
-            ['Días de gym/sem', 'gymDays', 'días', '4'],
-            ['Tiempo/sesión', 'workoutTime', 'min', '60'],
-          ].map(([label, field, unit, ph]) => (
-            <div key={field}>
-              <SLabel>{label}</SLabel>
-              <NumInput value={goalsEdit[field] || ''} onChange={v => setGoalsEdit(g => ({ ...g, [field]: v }))} placeholder={ph} unit={unit} />
-            </div>
-          ))}
-
-          <div style={{ borderTop: `1px solid ${T.border}`, paddingTop: 6 }} />
-          <div style={{ fontFamily: T.F, fontSize: 13, color: T.purple, letterSpacing: 1 }}>RECORDATORIO</div>
-          <div>
-            <SLabel>Hora del recordatorio de entrenamiento</SLabel>
-            <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-              <input
-                type="time"
-                value={goalsEdit.reminderTime || ''}
-                onChange={e => setGoalsEdit(g => ({ ...g, reminderTime: e.target.value }))}
-                style={{
-                  flex: 1, background: T.bg3, border: `1px solid ${T.border}`,
-                  borderRadius: 6, color: T.text, fontFamily: T.M, fontSize: 13,
-                  padding: '7px 9px', outline: 'none',
-                }}
-              />
-              <Btn size="sm" variant="dark" onClick={handleNotifRequest}>🔔 Activar</Btn>
-            </div>
-            <p style={{ fontFamily: T.B, fontSize: 10, color: T.muted, marginTop: 3 }}>
-              La app debe estar abierta para enviar notificaciones.
-            </p>
-          </div>
-
-          <Btn size="lg" style={{ width: '100%', marginTop: 6 }} onClick={() => { onSaveGoals(goalsEdit); setShowGoals(false) }}>
-            Guardar Perfil y Metas
-          </Btn>
-        </div>
       </Modal>
     </div>
   )
@@ -1464,6 +1570,14 @@ function ProgressTab({ logs, wLogs, goals }) {
 
 // ─── PLAN Tab ─────────────────────────────────────────────────────────────────
 
+const SPLITS = [
+  { id: 'ppl',   label: 'Push/Pull/Piernas', desc: 'PPL — Empuje · Jale · Piernas', days: ['Push (Pecho, Hombros, Tríceps)', 'Pull (Espalda, Bíceps)', 'Piernas (Cuádriceps, Femoral, Glúteos)', 'Push (Pecho, Hombros, Tríceps)', 'Pull (Espalda, Bíceps)', 'Piernas', 'Descanso'] },
+  { id: 'ul',    label: 'Upper/Lower', desc: 'Superior / Inferior alternado', days: ['Upper (Pecho, Espalda, Hombros, Brazos)', 'Lower (Piernas, Glúteos)', 'Upper', 'Lower', 'Upper', 'Descanso', 'Descanso'] },
+  { id: 'fb',    label: 'Full Body', desc: 'Cuerpo completo cada sesión', days: ['Full Body A', 'Full Body B', 'Full Body C', 'Full Body A', 'Full Body B', 'Descanso', 'Descanso'] },
+  { id: 'bro',   label: 'Bro Split', desc: 'Un músculo por día', days: ['Pecho', 'Espalda', 'Hombros', 'Piernas', 'Brazos (Bíceps + Tríceps)', 'Descanso', 'Descanso'] },
+  { id: 'custom', label: 'Personalizado', desc: 'La IA decide el split ideal', days: null },
+]
+
 function PlanTab({ logs, nutLogs, goals, wLogs, mealPlan, onSaveMealPlan }) {
   const [weekOffset, setWeekOffset] = useState(0)
   const [selectedDay, setSelectedDay] = useState(today())
@@ -1471,8 +1585,9 @@ function PlanTab({ logs, nutLogs, goals, wLogs, mealPlan, onSaveMealPlan }) {
   const [planError, setPlanError] = useState('')
   const [loadingDayMeal, setLoadingDayMeal] = useState(false)
   const [dayMealInput, setDayMealInput] = useState('')
-  const tdee = calcTDEE(goals, wLogs)
-  const targetCals = parseInt(goals?.targetCals) || tdee || 2000
+  const [splitType, setSplitType] = useState(mealPlan?.splitType || 'ppl')
+  const [showSplitPicker, setShowSplitPicker] = useState(false)
+  const targetCals = parseInt(goals?.targetCals) || calcTDEE(goals, wLogs) || 2000
 
   const getWeekDays = (offset = 0) => {
     const now = new Date()
@@ -1489,32 +1604,50 @@ function PlanTab({ logs, nutLogs, goals, wLogs, mealPlan, onSaveMealPlan }) {
   const DAY_SHORT = ['L', 'M', 'X', 'J', 'V', 'S', 'D']
 
   const generateWeekPlan = async () => {
-    setLoadingPlan(true); setPlanError('')
+    setLoadingPlan(true); setPlanError(''); setShowSplitPicker(false)
     try {
       const lastW = [...(wLogs || [])].sort((a, b) => b.date.localeCompare(a.date))[0]?.weight
       const proteinTarget = goals?.targetProtein || Math.round((parseFloat(lastW) || 70) * 2)
       const gymDays = parseInt(goals?.gymDays) || 4
       const workoutTime = goals?.workoutTime || 60
       const goalType = goals?.goalType === 'lose' ? 'bajar grasa' : goals?.goalType === 'gain' ? 'ganar músculo' : 'mantenimiento'
+      const selectedSplit = SPLITS.find(s => s.id === splitType)
+
+      // Build split day assignments
+      const gymDayIndices = []
+      for (let i = 0; i < 7 && gymDayIndices.length < gymDays; i++) {
+        if (selectedSplit?.days?.[i] !== 'Descanso') gymDayIndices.push(i)
+      }
+      const splitAssignment = Array.from({ length: 7 }, (_, i) => {
+        if (!gymDayIndices.includes(i)) return 'Descanso activo — sin pesas'
+        const splitDays = selectedSplit?.days
+        if (splitDays) return splitDays[gymDayIndices.indexOf(i)] || splitDays[gymDayIndices.indexOf(i) % splitDays.filter(d => d !== 'Descanso').length]
+        return 'Decidir según el split'
+      })
+      const dayNames = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo']
+      const splitPromptPart = selectedSplit?.id === 'custom'
+        ? `Split: elige el más adecuado para ${gymDays} días/semana y objetivo ${goalType}.`
+        : `Split: ${selectedSplit?.label}.\nAsignación de días:\n${dayNames.map((d, i) => `- ${d}: ${splitAssignment[i]}`).join('\n')}`
+
       const raw = await callAI(
         `Eres coach de fitness y nutricionista experto. Crea un plan completo de 7 días.
 Objetivo: ${goalType}. Días de gym: ${gymDays}/semana. Tiempo por sesión: ${workoutTime} min.
 Calorías diarias: ~${targetCals} kcal. Proteína mínima: ${proteinTarget}g/día. Cocina colombiana variada.
+${splitPromptPart}
 
 Responde ÚNICAMENTE con JSON válido, sin markdown ni texto extra:
-{"days":[{"day":"Lunes","isRest":false,"workout":{"name":"Full Body A","focus":"descripción breve","exercises":[{"name":"ejercicio","sets":4,"reps":"8-10","notes":"tip"}]},"breakfast":"~Xcal","lunch":"~Xcal","dinner":"~Xcal","snack":"~Xcal","totalCals":2200}]}
+{"days":[{"day":"Lunes","isRest":false,"workout":{"name":"Nombre rutina","focus":"grupo muscular del día","exercises":[{"name":"ejercicio","sets":4,"reps":"8-10","notes":"tip técnico"}]},"breakfast":"descripción (~Xcal)","lunch":"descripción (~Xcal)","dinner":"descripción (~Xcal)","snack":"descripción (~Xcal)","totalCals":2200}]}
 
 Reglas:
 - Exactamente 7 días (Lunes a Domingo).
-- Si isRest=true, omite workout o ponlo null.
-- Distribuye los ${gymDays} días de gym a lo largo de la semana.
-- Cada día de gym: 4-6 ejercicios, varía grupos musculares (no repetir el mismo día seguido).
-- Los días de descanso igual tienen plan de comidas.`,
-        [{ role: 'user', content: `Genera el plan semanal completo para ${lastW || '75'}kg, objetivo: ${goalType}.` }],
-        2800
+- Si isRest=true, omite workout o ponlo null. Los días de descanso igual tienen plan de comidas.
+- Cada día de gym: 4-6 ejercicios específicos para el grupo muscular asignado.
+- El nombre del workout debe reflejar el grupo muscular (ej: "Piernas — Cuádriceps y Femoral").`,
+        [{ role: 'user', content: `Genera el plan semanal completo para ${lastW || '75'}kg, objetivo: ${goalType}, split: ${selectedSplit?.label}.` }],
+        3000
       )
       const parsed = JSON.parse(raw.trim())
-      onSaveMealPlan({ ...(mealPlan || {}), ...parsed, generated: today(), targetCals, customDays: {} })
+      onSaveMealPlan({ ...(mealPlan || {}), ...parsed, generated: today(), targetCals, splitType, customDays: {} })
     } catch { setPlanError('Error generando el plan. Intenta de nuevo.') }
     setLoadingPlan(false)
   }
@@ -1551,12 +1684,38 @@ Adapta el plan para incluir lo que el usuario quiere. Ajusta las otras comidas p
   return (
     <div>
       {/* Header */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
         <div style={{ fontFamily: T.F, fontSize: 30, color: T.text, letterSpacing: 2 }}>PLAN</div>
-        <Btn size="sm" variant="ai" loading={loadingPlan} onClick={generateWeekPlan}>
-          {mealPlan?.days ? '↻ Regenerar' : '✨ Generar semana'}
-        </Btn>
+        <div style={{ display: 'flex', gap: 5 }}>
+          <Btn size="sm" variant="dark" onClick={() => setShowSplitPicker(p => !p)}>⚙️ Split</Btn>
+          <Btn size="sm" variant="ai" loading={loadingPlan} onClick={() => showSplitPicker ? generateWeekPlan() : setShowSplitPicker(true)}>
+            {mealPlan?.days ? '↻ Regenerar' : '✨ Generar'}
+          </Btn>
+        </div>
       </div>
+
+      {/* Split picker */}
+      {showSplitPicker && (
+        <Card style={{ marginBottom: 12 }}>
+          <div style={{ fontFamily: T.M, fontSize: 10, color: T.lime, letterSpacing: 1, marginBottom: 8 }}>TIPO DE SPLIT</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 5, marginBottom: 10 }}>
+            {SPLITS.map(s => (
+              <button key={s.id} onClick={() => setSplitType(s.id)} style={{
+                padding: '8px 11px', borderRadius: 7, cursor: 'pointer', textAlign: 'left',
+                background: splitType === s.id ? `${T.lime}15` : T.bg3,
+                border: `1px solid ${splitType === s.id ? T.lime : T.border}`,
+                outline: 'none',
+              }}>
+                <div style={{ fontFamily: T.B, fontSize: 12, fontWeight: 700, color: splitType === s.id ? T.lime : T.text }}>{s.label}</div>
+                <div style={{ fontFamily: T.B, fontSize: 10, color: T.muted, marginTop: 1 }}>{s.desc}</div>
+              </button>
+            ))}
+          </div>
+          <Btn variant="ai" size="sm" loading={loadingPlan} style={{ width: '100%' }} onClick={generateWeekPlan}>
+            ✨ Generar plan con este split
+          </Btn>
+        </Card>
+      )}
 
       {/* Calendar */}
       <Card style={{ marginBottom: 12, padding: '10px 8px 8px' }}>
@@ -2084,7 +2243,11 @@ export default function App() {
   }, [])
 
   const saveNut = useCallback(n => {
-    setNutLogs(prev => { const next = [...prev.filter(x => x.date !== today()), n]; lset(K.n, next); return next })
+    setNutLogs(prev => { const next = [...prev, { ...n, id: n.id || uid(), date: n.date || today() }]; lset(K.n, next); return next })
+  }, [])
+
+  const deleteNut = useCallback(id => {
+    setNutLogs(prev => { const next = prev.filter(x => x.id !== id); lset(K.n, next); return next })
   }, [])
 
   const saveGoals = useCallback(g => { setGoals(g); lset(K.g, g) }, [])
@@ -2123,10 +2286,10 @@ export default function App() {
       {/* Content */}
       <div style={{ flex: 1, overflowY: 'auto', padding: '13px 12px', minHeight: 0 }}>
         <WeightPrompt wLogs={wLogs} onSave={saveWeight} />
-        {tab === 'hoy'       && <TodayTab routines={routines} logs={logs} goals={goals} wLogs={wLogs} onSaveLog={saveLog} />}
+        {tab === 'hoy'       && <TodayTab routines={routines} logs={logs} goals={goals} wLogs={wLogs} onSaveLog={saveLog} mealPlan={mealPlan} nutLogs={nutLogs} />}
         {tab === 'rutinas'   && <RoutinesTab routines={routines} goals={goals} onSave={saveRoutine} onDelete={deleteRoutine} />}
         {tab === 'historial' && <HistoryTab logs={logs} />}
-        {tab === 'nutricion' && <NutritionTab wLogs={wLogs} nutLogs={nutLogs} goals={goals} onSaveWeight={saveWeight} onSaveNut={saveNut} onSaveGoals={saveGoals} />}
+        {tab === 'nutricion' && <NutritionTab wLogs={wLogs} nutLogs={nutLogs} goals={goals} onSaveWeight={saveWeight} onSaveNut={saveNut} onDeleteNut={deleteNut} onSaveGoals={saveGoals} />}
         {tab === 'plan'      && <PlanTab logs={logs} nutLogs={nutLogs} goals={goals} wLogs={wLogs} mealPlan={mealPlan} onSaveMealPlan={saveMealPlan} />}
         {tab === 'progreso'  && <ProgressTab logs={logs} wLogs={wLogs} goals={goals} />}
         {tab === 'coach'     && <CoachTab goals={goals} routines={routines} wLogs={wLogs} />}
@@ -2154,4 +2317,5 @@ export default function App() {
     </div>
   )
 }
+
 
