@@ -1587,6 +1587,8 @@ const SPLITS = [
   { id: 'custom', label: 'Personalizado', desc: 'La IA decide el split ideal', days: null },
 ]
 
+const WEEK_DAYS_ES = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo']
+
 function PlanTab({ logs, nutLogs, goals, wLogs, mealPlan, onSaveMealPlan, routines, onSaveRoutine, onDeleteRoutine }) {
   const [weekOffset, setWeekOffset] = useState(0)
   const [selectedDay, setSelectedDay] = useState(today())
@@ -1596,7 +1598,18 @@ function PlanTab({ logs, nutLogs, goals, wLogs, mealPlan, onSaveMealPlan, routin
   const [dayMealInput, setDayMealInput] = useState('')
   const [splitType, setSplitType] = useState(mealPlan?.splitType || 'ppl')
   const [showSplitPicker, setShowSplitPicker] = useState(false)
+  const [gymSchedule, setGymSchedule] = useState(() => {
+    if (mealPlan?.gymSchedule) return mealPlan.gymSchedule
+    const n = Math.min(parseInt(goals?.gymDays) || 4, 7)
+    return WEEK_DAYS_ES.slice(0, n)
+  })
   const targetCals = parseInt(goals?.targetCals) || calcTDEE(goals, wLogs) || 2000
+
+  const toggleDay = (day) => {
+    setGymSchedule(prev =>
+      prev.includes(day) ? prev.filter(d => d !== day) : [...prev, day]
+    )
+  }
 
   const getWeekDays = (offset = 0) => {
     const now = new Date()
@@ -1617,26 +1630,29 @@ function PlanTab({ logs, nutLogs, goals, wLogs, mealPlan, onSaveMealPlan, routin
     try {
       const lastW = [...(wLogs || [])].sort((a, b) => b.date.localeCompare(a.date))[0]?.weight
       const proteinTarget = goals?.targetProtein || Math.round((parseFloat(lastW) || 70) * 2)
-      const gymDays = parseInt(goals?.gymDays) || 4
       const workoutTime = goals?.workoutTime || 60
       const goalType = goals?.goalType === 'lose' ? 'bajar grasa' : goals?.goalType === 'gain' ? 'ganar músculo' : 'mantenimiento'
       const selectedSplit = SPLITS.find(s => s.id === splitType) || SPLITS[0]
+      const trainDays = gymSchedule.length > 0 ? gymSchedule : WEEK_DAYS_ES.slice(0, 4)
+      const restDaysEs = WEEK_DAYS_ES.filter(d => !trainDays.includes(d))
+      const daysLine = `Días de ENTRENAMIENTO: ${trainDays.join(', ')}. Días de DESCANSO obligatorio: ${restDaysEs.length > 0 ? restDaysEs.join(', ') : 'ninguno'}.`
 
       const splitDesc = selectedSplit.id === 'custom'
-        ? `Elige el split más adecuado para ${gymDays} días/semana.`
-        : `Split: ${selectedSplit.label} — ${selectedSplit.desc}. Distribuye ${gymDays} días de gym a lo largo de la semana.`
+        ? `Elige el split más adecuado para ${trainDays.length} días de entrenamiento.`
+        : `Split: ${selectedSplit.label} — ${selectedSplit.desc}.`
 
       const raw = await callAI(
         `Eres entrenador y nutricionista. Genera un plan semanal de 7 días en JSON.
 ${splitDesc}
+${daysLine}
 Objetivo: ${goalType}. Peso: ${lastW || 75}kg. Tiempo por sesión: ${workoutTime}min.
 Calorías: ~${targetCals}kcal/día. Proteína mínima: ${proteinTarget}g/día. Comida colombiana.
 
 Devuelve SOLO el JSON, sin texto adicional ni markdown:
 {"days":[{"day":"Lunes","isRest":false,"workout":{"name":"Pecho y Tríceps","focus":"Empuje superior","exercises":[{"name":"Press de banca","sets":4,"reps":"8-10","notes":"baja controlado"}]},"breakfast":"Avena con banano (~350cal)","lunch":"Arroz, pollo asado, ensalada (~650cal)","dinner":"Sopa de lentejas, pan integral (~400cal)","snack":"Yogur griego con frutas (~200cal)","totalCals":2200}]}
 
-Reglas: exactamente 7 días Lunes-Domingo. Si isRest=true pon workout null. Cada día de gym 4-5 ejercicios enfocados en el grupo muscular del split.`,
-        [{ role: 'user', content: `Plan para ${lastW || 75}kg, ${goalType}, ${gymDays} días gym, split ${selectedSplit.label}.` }],
+Reglas: exactamente 7 días Lunes-Domingo. SOLO los días de entrenamiento indicados tienen isRest=false con workout. Los días de descanso DEBEN tener isRest=true y workout=null. Cada día de gym 4-5 ejercicios.`,
+        [{ role: 'user', content: `Plan para ${lastW || 75}kg, ${goalType}, split ${selectedSplit.label}. Entreno: ${trainDays.join(', ')}.` }],
         4500
       )
 
@@ -1644,7 +1660,7 @@ Reglas: exactamente 7 días Lunes-Domingo. Si isRest=true pon workout null. Cada
       if (!parsed.days || !Array.isArray(parsed.days)) throw new Error('Formato inválido')
 
       // Save to meal plan
-      onSaveMealPlan({ ...(mealPlan || {}), ...parsed, generated: today(), targetCals, splitType, customDays: {} })
+      onSaveMealPlan({ ...(mealPlan || {}), ...parsed, generated: today(), targetCals, splitType, gymSchedule: trainDays, customDays: {} })
 
       // Also save each gym day's workout as a routine in the RUTINAS tab
       // First remove any previously plan-generated routines
@@ -1733,6 +1749,32 @@ Adapta el plan para incluir lo que el usuario quiere. Ajusta las otras comidas p
               </button>
             ))}
           </div>
+
+          {/* Day selector */}
+          <div style={{ marginBottom: 10 }}>
+            <div style={{ fontFamily: T.M, fontSize: 10, color: T.lime, letterSpacing: 1, marginBottom: 6 }}>DÍAS QUE VAS AL GYM</div>
+            <div style={{ display: 'flex', gap: 4 }}>
+              {WEEK_DAYS_ES.map((day, i) => {
+                const active = gymSchedule.includes(day)
+                return (
+                  <button key={day} onClick={() => toggleDay(day)} style={{
+                    flex: 1, padding: '7px 0', borderRadius: 7, cursor: 'pointer',
+                    background: active ? `${T.lime}22` : T.bg3,
+                    border: `1.5px solid ${active ? T.lime : T.border}`,
+                    color: active ? T.lime : T.muted,
+                    fontFamily: T.M, fontSize: 12, fontWeight: active ? 700 : 400,
+                    outline: 'none', transition: 'background 0.12s',
+                  }}>
+                    {['L','M','X','J','V','S','D'][i]}
+                  </button>
+                )
+              })}
+            </div>
+            <div style={{ fontFamily: T.B, fontSize: 10, color: T.muted, marginTop: 5 }}>
+              {gymSchedule.length} día{gymSchedule.length !== 1 ? 's' : ''} de gym · {7 - gymSchedule.length} de descanso
+            </div>
+          </div>
+
           <Btn variant="ai" size="sm" loading={loadingPlan} style={{ width: '100%' }} onClick={generateWeekPlan}>
             ✨ Generar plan con este split
           </Btn>
@@ -2339,3 +2381,4 @@ export default function App() {
     </div>
   )
 }
+
