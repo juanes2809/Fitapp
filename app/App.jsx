@@ -15,7 +15,7 @@ const T = {
 const K = { r: 'ft_r', l: 'ft_l', w: 'ft_w', n: 'ft_n', g: 'ft_g', mp: 'ft_mp' }
 const lget = (k) => { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : null } catch { return null } }
 const lset = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)) } catch {} }
-const today = () => new Date().toISOString().split('T')[0]
+const today = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}` }
 const fdate = (d) => new Date(d + 'T12:00:00').toLocaleDateString('es-CO', { weekday: 'short', day: 'numeric', month: 'short' })
 const uid = () => Math.random().toString(36).slice(2, 8)
 
@@ -2381,4 +2381,3 @@ export default function App() {
     </div>
   )
 }
-
