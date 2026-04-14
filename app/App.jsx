@@ -601,6 +601,7 @@ function TodayTab({ routines, logs, goals, wLogs, onSaveLog, mealPlan, nutLogs }
   const [restSeconds, setRestSeconds] = useState(60)
   const todayLog = logs.find(l => l.date === today())
   const targetCals = parseInt(goals?.targetCals) || calcTDEE(goals, wLogs) || 2000
+  const targetProtein = parseInt(goals?.targetProtein) || 0
 
   // Today's nutrition from logs
   const todayNuts = (nutLogs || []).filter(n => n.date === today())
@@ -827,22 +828,30 @@ function TodayTab({ routines, logs, goals, wLogs, onSaveLog, mealPlan, nutLogs }
       {/* Nutrition logged today summary */}
       {todayNuts.length > 0 && (
         <Card>
-          <div style={{ fontFamily: T.M, fontSize: 10, color: T.orange, letterSpacing: 1, marginBottom: 6 }}>📊 REGISTRADO HOY</div>
-          <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
+          <div style={{ fontFamily: T.M, fontSize: 10, color: T.orange, letterSpacing: 1, marginBottom: 8 }}>📊 REGISTRADO HOY</div>
+          <div style={{ display: 'flex', gap: 6, marginBottom: 6 }}>
             <div style={{ flex: 1, background: T.bg3, borderRadius: 6, padding: '6px 8px', textAlign: 'center' }}>
-              <div style={{ fontFamily: T.M, fontSize: 14, fontWeight: 700, color: T.orange }}>{Math.round(nutTotal.calories || 0)}</div>
+              <div style={{ fontFamily: T.M, fontSize: 13, fontWeight: 700, color: T.orange }}>{Math.round(nutTotal.calories || 0)}<span style={{ fontSize: 9, color: T.muted }}>/{targetCals}</span></div>
               <div style={{ fontFamily: T.B, fontSize: 9, color: T.muted }}>kcal</div>
             </div>
             <div style={{ flex: 1, background: T.bg3, borderRadius: 6, padding: '6px 8px', textAlign: 'center' }}>
-              <div style={{ fontFamily: T.M, fontSize: 14, fontWeight: 700, color: T.lime }}>{Math.round(nutTotal.protein || 0)}g</div>
+              <div style={{ fontFamily: T.M, fontSize: 13, fontWeight: 700, color: T.lime }}>{Math.round(nutTotal.protein || 0)}<span style={{ fontSize: 9, color: T.muted }}>{targetProtein ? `/${targetProtein}g` : 'g'}</span></div>
               <div style={{ fontFamily: T.B, fontSize: 9, color: T.muted }}>proteína</div>
             </div>
-            {targetCals && <div style={{ flex: 1, background: T.bg3, borderRadius: 6, padding: '6px 8px', textAlign: 'center' }}>
-              <div style={{ fontFamily: T.M, fontSize: 14, fontWeight: 700, color: targetCals - (nutTotal.calories || 0) > 0 ? T.teal : T.red }}>
+            <div style={{ flex: 1, background: T.bg3, borderRadius: 6, padding: '6px 8px', textAlign: 'center' }}>
+              <div style={{ fontFamily: T.M, fontSize: 13, fontWeight: 700, color: targetCals - (nutTotal.calories || 0) > 0 ? T.teal : T.red }}>
                 {Math.abs(Math.round(targetCals - (nutTotal.calories || 0)))}
               </div>
-              <div style={{ fontFamily: T.B, fontSize: 9, color: T.muted }}>{targetCals - (nutTotal.calories || 0) > 0 ? 'restante' : 'exceso'}</div>
-            </div>}
+              <div style={{ fontFamily: T.B, fontSize: 9, color: T.muted }}>{targetCals - (nutTotal.calories || 0) > 0 ? 'cal rest.' : 'cal exc.'}</div>
+            </div>
+            {targetProtein > 0 && (
+              <div style={{ flex: 1, background: T.bg3, borderRadius: 6, padding: '6px 8px', textAlign: 'center' }}>
+                <div style={{ fontFamily: T.M, fontSize: 13, fontWeight: 700, color: targetProtein - (nutTotal.protein || 0) > 0 ? T.purple : T.lime }}>
+                  {Math.abs(Math.round(targetProtein - (nutTotal.protein || 0)))}g
+                </div>
+                <div style={{ fontFamily: T.B, fontSize: 9, color: T.muted }}>{targetProtein - (nutTotal.protein || 0) > 0 ? 'prot rest.' : 'prot ok'}</div>
+              </div>
+            )}
           </div>
           {todayNuts.map(n => (
             <div key={n.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '3px 0', borderBottom: `1px solid ${T.border}` }}>
@@ -880,7 +889,13 @@ function RoutinesTab({ routines, goals, onSave, onDelete }) {
 
   const saveRoutine = () => {
     if (!name.trim() || exercises.length === 0) return
-    onSave({ id: editRoutine?.id || uid(), name: name.trim(), exercises })
+    onSave({
+      id: editRoutine?.id || uid(),
+      name: name.trim(),
+      exercises,
+      ...(editRoutine?.aiGenerated ? { aiGenerated: true } : {}),
+      ...(editRoutine?.fromPlan ? { fromPlan: true, planDayName: editRoutine.planDayName } : {}),
+    })
     setMode(null)
   }
 
@@ -1513,7 +1528,8 @@ function ProgressTab({ logs, wLogs, goals }) {
     let s = 0
     for (let i = 0; i < Math.min(dates.length, 30); i++) {
       const exp = new Date(); exp.setDate(exp.getDate() - i)
-      if (dates[i] === exp.toISOString().split('T')[0]) s++; else break
+      const expStr = `${exp.getFullYear()}-${String(exp.getMonth()+1).padStart(2,'0')}-${String(exp.getDate()).padStart(2,'0')}`
+      if (dates[i] === expStr) s++; else break
     }
     return s
   })()
@@ -1589,7 +1605,7 @@ const SPLITS = [
 
 const WEEK_DAYS_ES = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo']
 
-function PlanTab({ logs, nutLogs, goals, wLogs, mealPlan, onSaveMealPlan, routines, onSaveRoutine, onDeleteRoutine }) {
+function PlanTab({ logs, nutLogs, goals, wLogs, mealPlan, onSaveMealPlan, routines, onSaveRoutine, onDeleteRoutine, onSaveNut, onSaveGoals }) {
   const [weekOffset, setWeekOffset] = useState(0)
   const [selectedDay, setSelectedDay] = useState(today())
   const [loadingPlan, setLoadingPlan] = useState(false)
@@ -1597,6 +1613,7 @@ function PlanTab({ logs, nutLogs, goals, wLogs, mealPlan, onSaveMealPlan, routin
   const [loadingDayMeal, setLoadingDayMeal] = useState(false)
   const [dayMealInput, setDayMealInput] = useState('')
   const [splitType, setSplitType] = useState(mealPlan?.splitType || 'ppl')
+  const [userFoods, setUserFoods] = useState(goals?.userFoods || '')
   const [showSplitPicker, setShowSplitPicker] = useState(false)
   const [gymSchedule, setGymSchedule] = useState(() => {
     if (mealPlan?.gymSchedule) return mealPlan.gymSchedule
@@ -1618,7 +1635,7 @@ function PlanTab({ logs, nutLogs, goals, wLogs, mealPlan, onSaveMealPlan, routin
     monday.setDate(now.getDate() - (day === 0 ? 6 : day - 1) + offset * 7)
     return Array.from({ length: 7 }, (_, i) => {
       const d = new Date(monday); d.setDate(monday.getDate() + i)
-      return d.toISOString().split('T')[0]
+      return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`
     })
   }
 
@@ -1641,17 +1658,27 @@ function PlanTab({ logs, nutLogs, goals, wLogs, mealPlan, onSaveMealPlan, routin
         ? `Elige el split más adecuado para ${trainDays.length} días de entrenamiento.`
         : `Split: ${selectedSplit.label} — ${selectedSplit.desc}.`
 
+      const foodsLine = userFoods?.trim()
+        ? `Alimentos que el usuario consume: ${userFoods.trim()}. USA SOLO estos alimentos en las comidas, combínalos de forma variada.`
+        : `Usa alimentos colombianos SIMPLES y comunes: huevos, pollo, carne res, atún, arroz blanco, papa, plátano, frijoles, lentejas, aguacate, tomate, cebolla, leche, avena, banano, mango. EVITA ingredientes exóticos o difíciles de conseguir como chía, arroz integral, quinoa, espinaca baby, etc.`
+      const goalLine = goalType === 'bajar grasa'
+        ? `DÉFICIT calórico: ~${targetCals}kcal/día (mantenimiento - 400 a 500kcal). Proteína MUY ALTA: mínimo ${proteinTarget}g/día para preservar músculo. Comidas bajas en grasa, altas en proteína.`
+        : goalType === 'ganar músculo'
+        ? `SUPERÁVIT calórico: ~${targetCals}kcal/día. Proteína alta: mínimo ${proteinTarget}g/día. Carbohidratos suficientes para energía y recuperación.`
+        : `Calorías de mantenimiento: ~${targetCals}kcal/día. Proteína: mínimo ${proteinTarget}g/día. Comidas balanceadas.`
+
       const raw = await callAI(
-        `Eres entrenador y nutricionista. Genera un plan semanal de 7 días en JSON.
+        `Eres entrenador y nutricionista experto en cocina colombiana. Genera un plan semanal de 7 días en JSON.
 ${splitDesc}
 ${daysLine}
 Objetivo: ${goalType}. Peso: ${lastW || 75}kg. Tiempo por sesión: ${workoutTime}min.
-Calorías: ~${targetCals}kcal/día. Proteína mínima: ${proteinTarget}g/día. Comida colombiana.
+${goalLine}
+${foodsLine}
 
 Devuelve SOLO el JSON, sin texto adicional ni markdown:
-{"days":[{"day":"Lunes","isRest":false,"workout":{"name":"Pecho y Tríceps","focus":"Empuje superior","exercises":[{"name":"Press de banca","sets":4,"reps":"8-10","notes":"baja controlado"}]},"breakfast":"Avena con banano (~350cal)","lunch":"Arroz, pollo asado, ensalada (~650cal)","dinner":"Sopa de lentejas, pan integral (~400cal)","snack":"Yogur griego con frutas (~200cal)","totalCals":2200}]}
+{"days":[{"day":"Lunes","isRest":false,"workout":{"name":"Pecho y Tríceps","focus":"Empuje superior","exercises":[{"name":"Press de banca","sets":4,"reps":"8-10","notes":"baja controlado"}]},"breakfast":"2 huevos revueltos + avena con banano (~380cal)","lunch":"Arroz, pollo asado a la plancha, ensalada de tomate (~620cal)","dinner":"Sopa de lentejas con pollo (~380cal)","snack":"1 banano + 2 huevos duros (~220cal)","totalCals":1600}]}
 
-Reglas: exactamente 7 días Lunes-Domingo. SOLO los días de entrenamiento indicados tienen isRest=false con workout. Los días de descanso DEBEN tener isRest=true y workout=null. Cada día de gym 4-5 ejercicios.`,
+Reglas: exactamente 7 días Lunes-Domingo. SOLO los días de entrenamiento indicados tienen isRest=false con workout. Los días de descanso DEBEN tener isRest=true y workout=null. Cada día de gym 4-5 ejercicios. Las comidas deben ser SIMPLES, con cantidades aproximadas y calorías estimadas entre paréntesis.`,
         [{ role: 'user', content: `Plan para ${lastW || 75}kg, ${goalType}, split ${selectedSplit.label}. Entreno: ${trainDays.join(', ')}.` }],
         4500
       )
@@ -1680,6 +1707,7 @@ Reglas: exactamente 7 días Lunes-Domingo. SOLO los días de entrenamiento indic
             })),
             aiGenerated: true,
             fromPlan: true,
+            planDayName: day.day,
           })
         }
       })
@@ -1718,6 +1746,18 @@ Adapta el plan para incluir lo que el usuario quiere. Ajusta las otras comidas p
   const selectedMealDay = customDay || planDay
   const selectedLog = logs.find(l => l.date === selectedDay)
   const selectedNut = nutLogs.find(n => n.date === selectedDay)
+
+  // "Comí esto" — log a planned meal directly from the plan view
+  const logMealFromPlan = (mealLabel, text) => {
+    const match = text.match(/~?(\d{3,4})\s*cal/i)
+    const calories = match ? parseInt(match[1]) : Math.round(targetCals / 4)
+    const proteinPct = goals?.goalType === 'lose' ? 0.35 : goals?.goalType === 'gain' ? 0.30 : 0.25
+    const protein = Math.round(calories * proteinPct / 4)
+    onSaveNut({ id: uid(), date: selectedDay, meal: mealLabel, notes: text, calories, protein, carbs: 0, fat: 0 })
+  }
+
+  // Already logged meal labels for selected day
+  const loggedMealsToday = nutLogs.filter(n => n.date === selectedDay).map(n => n.meal)
 
   return (
     <div>
@@ -1772,6 +1812,27 @@ Adapta el plan para incluir lo que el usuario quiere. Ajusta las otras comidas p
             </div>
             <div style={{ fontFamily: T.B, fontSize: 10, color: T.muted, marginTop: 5 }}>
               {gymSchedule.length} día{gymSchedule.length !== 1 ? 's' : ''} de gym · {7 - gymSchedule.length} de descanso
+            </div>
+          </div>
+
+          <div style={{ marginBottom: 10 }}>
+            <div style={{ fontFamily: T.M, fontSize: 10, color: T.lime, letterSpacing: 1, marginBottom: 5 }}>¿QUÉ ALIMENTOS CONSUMES?</div>
+            <textarea
+              value={userFoods}
+              onChange={e => {
+                setUserFoods(e.target.value)
+                if (onSaveGoals) onSaveGoals({ ...goals, userFoods: e.target.value })
+              }}
+              rows={2}
+              placeholder="Ej: huevos, pollo, arroz blanco, papa, plátano, frijoles, aguacate, leche, atún..."
+              style={{
+                width: '100%', background: T.bg4, border: `1px solid ${T.border}`,
+                borderRadius: 6, color: T.text, fontFamily: T.B, fontSize: 11,
+                padding: '7px 9px', resize: 'none', outline: 'none',
+              }}
+            />
+            <div style={{ fontFamily: T.B, fontSize: 9, color: T.muted, marginTop: 3 }}>
+              El plan usará solo estos alimentos. Déjalo vacío para que la IA elija.
             </div>
           </div>
 
@@ -1931,10 +1992,25 @@ Adapta el plan para incluir lo que el usuario quiere. Ajusta las otras comidas p
                 </div>
               </div>
               {[['🌅', 'Desayuno', selectedMealDay.breakfast], ['☀️', 'Almuerzo', selectedMealDay.lunch], ['🌙', 'Cena', selectedMealDay.dinner], ['🍎', 'Merienda', selectedMealDay.snack]].map(([icon, label, text]) => text && (
-                <div key={label} style={{ display: 'flex', gap: 7, padding: '5px 0', borderBottom: `1px solid ${T.border}` }}>
-                  <span style={{ fontSize: 13, minWidth: 20 }}>{icon}</span>
-                  <span style={{ fontFamily: T.B, fontSize: 10, color: T.muted, minWidth: 58 }}>{label}</span>
-                  <span style={{ fontFamily: T.B, fontSize: 11, color: T.dim, flex: 1 }}>{text}</span>
+                <div key={label} style={{ padding: '6px 0', borderBottom: `1px solid ${T.border}` }}>
+                  <div style={{ display: 'flex', gap: 7, alignItems: 'flex-start' }}>
+                    <span style={{ fontSize: 13, minWidth: 20 }}>{icon}</span>
+                    <span style={{ fontFamily: T.B, fontSize: 10, color: T.muted, minWidth: 58, paddingTop: 1 }}>{label}</span>
+                    <span style={{ fontFamily: T.B, fontSize: 11, color: T.dim, flex: 1 }}>{text}</span>
+                  </div>
+                  {onSaveNut && (
+                    loggedMealsToday.includes(label)
+                      ? <div style={{ marginTop: 4, marginLeft: 27, fontFamily: T.M, fontSize: 9, color: T.lime }}>✓ Registrado</div>
+                      : <button
+                          onClick={() => logMealFromPlan(label, text)}
+                          style={{
+                            marginTop: 4, marginLeft: 27, background: `${T.lime}15`,
+                            border: `1px solid ${T.lime}44`, borderRadius: 5,
+                            color: T.lime, fontFamily: T.B, fontSize: 10,
+                            padding: '2px 8px', cursor: 'pointer', outline: 'none',
+                          }}
+                        >✓ Comí esto</button>
+                  )}
                 </div>
               ))}
               {selectedMealDay.totalCals && <div style={{ marginTop: 6, textAlign: 'right' }}><Tag color={T.orange}>{selectedMealDay.totalCals} kcal</Tag></div>}
@@ -2289,6 +2365,22 @@ export default function App() {
       const next = prev.find(x => x.id === r.id) ? prev.map(x => x.id === r.id ? r : x) : [...prev, r]
       lset(K.r, next); return next
     })
+    // Sync edits back to plan if this routine came from the plan
+    if (r.fromPlan && r.planDayName) {
+      setMealPlan(prev => {
+        if (!prev?.days) return prev
+        const updated = {
+          ...prev,
+          days: prev.days.map(day =>
+            day.day === r.planDayName
+              ? { ...day, workout: { ...(day.workout || {}), name: r.name, exercises: r.exercises.map(ex => ({ name: ex.name, sets: ex.sets, reps: ex.reps, notes: ex.notes || '' })) } }
+              : day
+          ),
+        }
+        lset(K.mp, updated)
+        return updated
+      })
+    }
   }, [])
 
   const deleteRoutine = useCallback(id => {
@@ -2354,7 +2446,7 @@ export default function App() {
         {tab === 'rutinas'   && <RoutinesTab routines={routines} goals={goals} onSave={saveRoutine} onDelete={deleteRoutine} />}
         {tab === 'historial' && <HistoryTab logs={logs} />}
         {tab === 'nutricion' && <NutritionTab wLogs={wLogs} nutLogs={nutLogs} goals={goals} onSaveWeight={saveWeight} onSaveNut={saveNut} onDeleteNut={deleteNut} onSaveGoals={saveGoals} />}
-        {tab === 'plan'      && <PlanTab logs={logs} nutLogs={nutLogs} goals={goals} wLogs={wLogs} mealPlan={mealPlan} onSaveMealPlan={saveMealPlan} routines={routines} onSaveRoutine={saveRoutine} onDeleteRoutine={deleteRoutine} />}
+        {tab === 'plan'      && <PlanTab logs={logs} nutLogs={nutLogs} goals={goals} wLogs={wLogs} mealPlan={mealPlan} onSaveMealPlan={saveMealPlan} routines={routines} onSaveRoutine={saveRoutine} onDeleteRoutine={deleteRoutine} onSaveNut={saveNut} onSaveGoals={saveGoals} />}
         {tab === 'progreso'  && <ProgressTab logs={logs} wLogs={wLogs} goals={goals} />}
         {tab === 'coach'     && <CoachTab goals={goals} routines={routines} wLogs={wLogs} />}
       </div>
