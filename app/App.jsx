@@ -1466,6 +1466,32 @@ function NutritionTab({ wLogs, nutLogs, goals, onSaveWeight, onSaveNut, onDelete
               </div>
             </div>
 
+            <div>
+              <SLabel>Presupuesto de comidas</SLabel>
+              <div style={{ display: 'flex', gap: 4 }}>
+                {[
+                  ['cheap', '💸 Económico'],
+                  ['moderate', '💰 Moderado'],
+                  ['premium', '💎 Completo'],
+                ].map(([val, label]) => (
+                  <button key={val} onClick={() => setGoalsEdit(g => ({ ...g, mealBudget: val }))} style={{
+                    flex: 1, padding: '7px 4px', borderRadius: 6, cursor: 'pointer',
+                    background: (goalsEdit.mealBudget || 'moderate') === val ? `${T.teal}25` : T.bg3,
+                    color: (goalsEdit.mealBudget || 'moderate') === val ? T.teal : T.muted,
+                    border: `1px solid ${(goalsEdit.mealBudget || 'moderate') === val ? T.teal : T.border}`,
+                    fontFamily: T.B, fontSize: 11, fontWeight: 600, outline: 'none',
+                  }}>{label}</button>
+                ))}
+              </div>
+              <div style={{ fontFamily: T.B, fontSize: 10, color: T.muted, marginTop: 3 }}>
+                {(goalsEdit.mealBudget || 'moderate') === 'cheap'
+                  ? 'Huevos, arroz, papa, frijoles, plátano, pollo, atún. Simple y barato.'
+                  : (goalsEdit.mealBudget || 'moderate') === 'premium'
+                  ? 'Más variedad: carne res, queso, yogur, frutas, aguacate, etc.'
+                  : 'Ingredientes cotidianos colombianos. Balance entre precio y variedad.'}
+              </div>
+            </div>
+
             {[
               ['Peso objetivo', 'targetWeight', 'kg', '72'],
               ['Calorías diarias', 'targetCals', 'kcal', maintPreview ? String(maintPreview) : '2500'],
@@ -1658,14 +1684,30 @@ function PlanTab({ logs, nutLogs, goals, wLogs, mealPlan, onSaveMealPlan, routin
         ? `Elige el split más adecuado para ${trainDays.length} días de entrenamiento.`
         : `Split: ${selectedSplit.label} — ${selectedSplit.desc}.`
 
+      const targetWeight = goals?.targetWeight ? parseFloat(goals.targetWeight) : null
+      const mealBudget = goals?.mealBudget || 'moderate'
+      const trainCals = targetCals
+      const restCals = goalType === 'bajar grasa'
+        ? Math.max(1200, targetCals - 250)
+        : Math.max(1400, targetCals - 150)
+
+      const budgetLine = mealBudget === 'cheap'
+        ? `Presupuesto ECONÓMICO: usa ÚNICAMENTE ingredientes baratos y accesibles: huevos, arroz blanco, papa, frijoles, lentejas, plátano, banano, pollo (muslos o pechuga entera), atún en lata, avena, leche, tomate, cebolla, ajo. Máximo 3 ingredientes principales por comida. NADA exótico ni costoso.`
+        : mealBudget === 'premium'
+        ? `Presupuesto COMPLETO: puedes usar variedad de alimentos: carne de res, pollo, salmón, atún, queso, yogur, huevos, frutas variadas, aguacate, etc. Preferir alimentos colombianos cuando sea posible.`
+        : `Usa alimentos colombianos SIMPLES y comunes: huevos, pollo, carne res, atún, arroz blanco, papa, plátano, frijoles, lentejas, aguacate, tomate, cebolla, leche, avena, banano, mango. EVITA ingredientes exóticos o difíciles de conseguir como chía, arroz integral, quinoa, espinaca baby, etc.`
+
       const foodsLine = userFoods?.trim()
         ? `Alimentos que el usuario consume: ${userFoods.trim()}. USA SOLO estos alimentos en las comidas, combínalos de forma variada.`
-        : `Usa alimentos colombianos SIMPLES y comunes: huevos, pollo, carne res, atún, arroz blanco, papa, plátano, frijoles, lentejas, aguacate, tomate, cebolla, leche, avena, banano, mango. EVITA ingredientes exóticos o difíciles de conseguir como chía, arroz integral, quinoa, espinaca baby, etc.`
+        : budgetLine
+      const weightGoalLine = targetWeight
+        ? ` Meta de peso: llegar a ${targetWeight}kg (peso actual: ${lastW || 75}kg).`
+        : ''
       const goalLine = goalType === 'bajar grasa'
-        ? `DÉFICIT calórico: ~${targetCals}kcal/día (mantenimiento - 400 a 500kcal). Proteína MUY ALTA: mínimo ${proteinTarget}g/día para preservar músculo. Comidas bajas en grasa, altas en proteína.`
+        ? `DÉFICIT calórico: días de ENTRENO ~${trainCals}kcal, días de DESCANSO ~${restCals}kcal (menos carbos en descanso). Proteína MUY ALTA: mínimo ${proteinTarget}g/día para preservar músculo. Comidas altas en proteína, bajas en grasa.${weightGoalLine}`
         : goalType === 'ganar músculo'
-        ? `SUPERÁVIT calórico: ~${targetCals}kcal/día. Proteína alta: mínimo ${proteinTarget}g/día. Carbohidratos suficientes para energía y recuperación.`
-        : `Calorías de mantenimiento: ~${targetCals}kcal/día. Proteína: mínimo ${proteinTarget}g/día. Comidas balanceadas.`
+        ? `SUPERÁVIT calórico: días de ENTRENO ~${trainCals}kcal (más carbos pre/post entreno), días de DESCANSO ~${restCals}kcal. Proteína alta: mínimo ${proteinTarget}g/día. Carbohidratos suficientes para energía y recuperación.`
+        : `Calorías de mantenimiento: días de ENTRENO ~${trainCals}kcal, días de DESCANSO ~${restCals}kcal. Proteína: mínimo ${proteinTarget}g/día. Comidas balanceadas.`
 
       const raw = await callAI(
         `Eres entrenador y nutricionista experto en cocina colombiana. Genera un plan semanal de 7 días en JSON.
@@ -1676,10 +1718,10 @@ ${goalLine}
 ${foodsLine}
 
 Devuelve SOLO el JSON, sin texto adicional ni markdown:
-{"days":[{"day":"Lunes","isRest":false,"workout":{"name":"Pecho y Tríceps","focus":"Empuje superior","exercises":[{"name":"Press de banca","sets":4,"reps":"8-10","notes":"baja controlado"}]},"breakfast":"2 huevos revueltos + avena con banano (~380cal)","lunch":"Arroz, pollo asado a la plancha, ensalada de tomate (~620cal)","dinner":"Sopa de lentejas con pollo (~380cal)","snack":"1 banano + 2 huevos duros (~220cal)","totalCals":1600}]}
+{"days":[{"day":"Lunes","isRest":false,"workout":{"name":"Pecho y Tríceps","focus":"Empuje superior","exercises":[{"name":"Press de banca","sets":4,"reps":"8-10","notes":"baja controlado"}]},"breakfast":"5 huevos revueltos + avena con banano (~420cal)","lunch":"Arroz, pollo asado a la plancha, ensalada de tomate (~650cal)","dinner":"Sopa de lentejas con pollo (~380cal)","snack":"1 banano + 2 huevos duros (~220cal)","totalCals":${trainCals}},{"day":"Martes","isRest":true,"workout":null,"breakfast":"3 huevos revueltos + avena (~300cal)","lunch":"Arroz, lentejas, ensalada (~480cal)","dinner":"Sopa de pollo (~350cal)","snack":"1 banano (~90cal)","totalCals":${restCals}}]}
 
-Reglas: exactamente 7 días Lunes-Domingo. SOLO los días de entrenamiento indicados tienen isRest=false con workout. Los días de descanso DEBEN tener isRest=true y workout=null. Cada día de gym 4-5 ejercicios. Las comidas deben ser SIMPLES, con cantidades aproximadas y calorías estimadas entre paréntesis.`,
-        [{ role: 'user', content: `Plan para ${lastW || 75}kg, ${goalType}, split ${selectedSplit.label}. Entreno: ${trainDays.join(', ')}.` }],
+Reglas: exactamente 7 días Lunes-Domingo. SOLO los días de entrenamiento indicados tienen isRest=false con workout. Los días de descanso DEBEN tener isRest=true y workout=null. Cada día de gym 4-5 ejercicios. Las comidas deben ser SIMPLES, con cantidades aproximadas y calorías estimadas entre paréntesis. Días de ENTRENO: totalCals ~${trainCals}. Días de DESCANSO: totalCals ~${restCals}.`,
+        [{ role: 'user', content: `Plan para ${lastW || 75}kg, ${goalType}, split ${selectedSplit.label}. Entreno: ${trainDays.join(', ')}.${targetWeight ? ` Quiero llegar a ${targetWeight}kg.` : ''}` }],
         4500
       )
 
@@ -1813,6 +1855,11 @@ Adapta el plan para incluir lo que el usuario quiere. Ajusta las otras comidas p
             <div style={{ fontFamily: T.B, fontSize: 10, color: T.muted, marginTop: 5 }}>
               {gymSchedule.length} día{gymSchedule.length !== 1 ? 's' : ''} de gym · {7 - gymSchedule.length} de descanso
             </div>
+            {targetCals > 0 && (
+              <div style={{ fontFamily: T.M, fontSize: 9, color: T.teal, marginTop: 3 }}>
+                💪 Entreno: ~{targetCals} kcal &nbsp;·&nbsp; 😴 Descanso: ~{goals?.goalType === 'lose' ? Math.max(1200, targetCals - 250) : Math.max(1400, targetCals - 150)} kcal
+              </div>
+            )}
           </div>
 
           <div style={{ marginBottom: 10 }}>
@@ -2013,7 +2060,12 @@ Adapta el plan para incluir lo que el usuario quiere. Ajusta las otras comidas p
                   )}
                 </div>
               ))}
-              {selectedMealDay.totalCals && <div style={{ marginTop: 6, textAlign: 'right' }}><Tag color={T.orange}>{selectedMealDay.totalCals} kcal</Tag></div>}
+              {selectedMealDay.totalCals && (
+                <div style={{ marginTop: 6, display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 6 }}>
+                  {planDay && <Tag color={planDay.isRest ? T.muted : T.teal}>{planDay.isRest ? '😴 Descanso' : '💪 Entreno'}</Tag>}
+                  <Tag color={T.orange}>{selectedMealDay.totalCals} kcal</Tag>
+                </div>
+              )}
             </div>
           )}
 
@@ -2473,3 +2525,4 @@ export default function App() {
     </div>
   )
 }
+
