@@ -144,16 +144,15 @@ function Spark({ data, color = T.lime, width = 80, height = 28 }) {
   )
 }
 
-function Toast({ text, onClose }) {
-  useEffect(() => { const t = setTimeout(onClose, 2200); return () => clearTimeout(t) }, [])
+function Toast({ msg, color = T.lime }) {
   return (
     <div style={{
       position: 'fixed', top: 16, left: '50%', transform: 'translateX(-50%)',
-      background: T.lime, color: '#000', padding: '9px 18px', borderRadius: 999,
+      background: color, color: '#000', padding: '9px 18px', borderRadius: 999,
       fontFamily: T.B, fontSize: 13, fontWeight: 700, zIndex: 500,
       boxShadow: `0 8px 24px ${T.limeGlow}`, animation: 'toastIn 0.3s ease',
       whiteSpace: 'nowrap',
-    }}>{text}</div>
+    }}>{msg}</div>
   )
 }
 
@@ -472,7 +471,7 @@ function RestTimer({ seconds, onSkip, onDone }) {
 
 // ─── TODAY Tab ────────────────────────────────────────────────────────────────
 
-function TodayTab({ routines, logs, goals, wLogs, onSaveLog, mealPlan, nutLogs, water, onAddWater, onToast }) {
+function TodayTab({ routines, logs, goals, wLogs, saveLog, saveWeight, mealPlan, nutLogs, water, addWater, showToast }) {
   const [session, setSession] = useState(null)
   const [showPicker, setShowPicker] = useState(false)
   const [restTimer, setRestTimer] = useState(null)
@@ -527,7 +526,7 @@ function TodayTab({ routines, logs, goals, wLogs, onSaveLog, mealPlan, nutLogs, 
   }
 
   const updateSet = (ei, si, field, val) => setSession(s => ({ ...s, exercises: s.exercises.map((ex,i) => i!==ei ? ex : { ...ex, sets: ex.sets.map((st,j) => j!==si ? st : {...st,[field]:val}) }) }))
-  const finishWorkout = () => { onSaveLog({ id: uid(), date: today(), ...session }); setSession(null); onToast('🏁 ¡Entrenamiento completado!') }
+  const finishWorkout = () => { saveLog({ id: uid(), date: today(), ...session }); setSession(null); showToast('🏁 ¡Entrenamiento completado!') }
 
   if (session) {
     const totalDone = session.exercises.reduce((a,ex) => a + ex.sets.filter(s=>s.done).length, 0)
@@ -627,7 +626,7 @@ function TodayTab({ routines, logs, goals, wLogs, onSaveLog, mealPlan, nutLogs, 
         <div style={{ display:'flex', gap:6, marginTop:14, alignItems:'center' }}>
           <span style={{ fontFamily:T.M, fontSize:9, color:T.muted, letterSpacing:1, marginRight:4 }}>+ AGUA</span>
           {[1,2,3].map(n => (
-            <button key={n} onClick={() => { onAddWater(n); onToast(`+${n} vaso${n>1?'s':''} 💧`) }} style={{ background:T.bg3, border:`1px solid ${T.blue}44`, color:T.blue, borderRadius:999, padding:'5px 12px', fontFamily:T.M, fontSize:11, fontWeight:700, cursor:'pointer' }}>💧+{n}</button>
+            <button key={n} onClick={() => { addWater(n); showToast(`+${n} vaso${n>1?'s':''} 💧`) }} style={{ background:T.bg3, border:`1px solid ${T.blue}44`, color:T.blue, borderRadius:999, padding:'5px 12px', fontFamily:T.M, fontSize:11, fontWeight:700, cursor:'pointer' }}>💧+{n}</button>
           ))}
           <div style={{ marginLeft:'auto', display:'flex', gap:3 }}>
             {Array.from({length:waterGoal}).map((_,i) => <div key={i} style={{ width:10, height:14, borderRadius:2, background:i<water?T.blue:T.bg4, boxShadow:i<water?`0 0 6px ${T.blue}66`:'none', transition:'all 0.3s' }}/>)}
@@ -740,7 +739,7 @@ function TodayTab({ routines, logs, goals, wLogs, onSaveLog, mealPlan, nutLogs, 
         <div className="pulse" style={{ background:T.bg2, border:`1px solid ${T.lime}44`, borderRadius:14, padding:13, display:'flex', alignItems:'center', gap:10, flexWrap:'wrap' }}>
           <span style={{ fontSize:18 }}>⚖️</span>
           <span style={{ fontFamily:T.B, color:T.text, fontSize:13, flex:1, minWidth:130 }}>¿Cuál es tu peso hoy?</span>
-          <WeightInline wLogs={wLogs} onSaveGoals={null}/>
+          <WeightInline onSave={w => saveWeight({ date: today(), weight: w })}/>
         </div>
       )}
     </div>
@@ -762,7 +761,7 @@ function WeightInline({ onSave }) {
 
 const ROUTINE_COLORS = [T.lime, T.blue, T.orange, T.purple, T.teal, T.pink]
 
-function RoutinesTab({ routines, logs, goals, onSave, onDelete, onSaveLog, onToast }) {
+function RoutinesTab({ routines, logs, goals, saveRoutine, deleteRoutine, showToast }) {
   const [subTab, setSubTab] = useState('rutinas')
   const [filter, setFilter] = useState('all')
   const [mode, setMode] = useState(null)
@@ -774,9 +773,9 @@ function RoutinesTab({ routines, logs, goals, onSave, onDelete, onSaveLog, onToa
   const addExercise = () => setExercises(e => [...e, { id:uid(), name:'', sets:3, reps:10, weight:'' }])
   const updateExercise = (i, field, val) => setExercises(e => e.map((ex,idx) => idx===i ? {...ex,[field]:val} : ex))
   const removeExercise = (i) => setExercises(e => e.filter((_,idx) => idx!==i))
-  const saveRoutine = () => {
+  const handleSave = () => {
     if (!name.trim() || exercises.length===0) return
-    onSave({ id:editRoutine?.id||uid(), name:name.trim(), exercises, ...(editRoutine?.aiGenerated?{aiGenerated:true}:{}), ...(editRoutine?.fromPlan?{fromPlan:true,planDayName:editRoutine.planDayName}:{}) })
+    saveRoutine({ id:editRoutine?.id||uid(), name:name.trim(), exercises, ...(editRoutine?.aiGenerated?{aiGenerated:true}:{}), ...(editRoutine?.fromPlan?{fromPlan:true,planDayName:editRoutine.planDayName}:{}) })
     setMode(null)
   }
 
@@ -852,14 +851,14 @@ function RoutinesTab({ routines, logs, goals, onSave, onDelete, onSaveLog, onToa
                       </div>
                       <div style={{ display:'flex', gap:4, marginLeft:8 }}>
                         <button onClick={() => openManual(r)} style={{ background:T.bg3, color:T.text, border:`1px solid ${T.border}`, borderRadius:8, padding:'7px 10px', fontFamily:T.B, fontSize:12, cursor:'pointer' }}>✏️</button>
-                        <button onClick={() => onDelete(r.id)} style={{ background:'transparent', color:T.red, border:`1px solid ${T.red}44`, borderRadius:8, padding:'7px 10px', fontFamily:T.B, fontSize:12, cursor:'pointer' }}>✕</button>
+                        <button onClick={() => deleteRoutine(r.id)} style={{ background:'transparent', color:T.red, border:`1px solid ${T.red}44`, borderRadius:8, padding:'7px 10px', fontFamily:T.B, fontSize:12, cursor:'pointer' }}>✕</button>
                       </div>
                     </div>
                     <div style={{ display:'flex', flexWrap:'wrap', gap:4, marginBottom:10 }}>
                       {r.exercises.slice(0,4).map((ex,i) => <span key={i} style={{ background:T.bg4, color:T.muted, borderRadius:6, padding:'2px 7px', fontSize:10, fontFamily:T.M }}>{ex.name} {ex.sets}×{ex.reps}</span>)}
                       {r.exercises.length>4 && <span style={{ background:T.bg4, color:T.dim, borderRadius:6, padding:'2px 7px', fontSize:10, fontFamily:T.M }}>+{r.exercises.length-4} más</span>}
                     </div>
-                    <button onClick={() => onToast('Selecciona desde pestaña Hoy para registrar')} style={{ width:'100%', background:color, color:'#000', border:'none', borderRadius:10, padding:'10px', fontFamily:T.F, fontSize:14, letterSpacing:1.5, fontWeight:700, cursor:'pointer', boxShadow:`0 4px 14px ${color}55` }}>▶ INICIAR</button>
+                    <button onClick={() => showToast('Selecciona desde pestaña Hoy para registrar')} style={{ width:'100%', background:color, color:'#000', border:'none', borderRadius:10, padding:'10px', fontFamily:T.F, fontSize:14, letterSpacing:1.5, fontWeight:700, cursor:'pointer', boxShadow:`0 4px 14px ${color}55` }}>▶ INICIAR</button>
                   </div>
                 </div>
               )
@@ -913,7 +912,7 @@ function RoutinesTab({ routines, logs, goals, onSave, onDelete, onSaveLog, onToa
       )}
 
       <Modal open={mode==='ai'} onClose={() => setMode(null)} title="Rutina con IA">
-        <AIRoutineGen onSave={r => onSave(r)} onClose={() => setMode(null)} goals={goals}/>
+        <AIRoutineGen onSave={r => saveRoutine(r)} onClose={() => setMode(null)} goals={goals}/>
       </Modal>
 
       <Modal open={mode==='manual'} onClose={() => setMode(null)} title={editRoutine ? 'Editar Rutina' : 'Nueva Rutina'}>
@@ -940,7 +939,7 @@ function RoutinesTab({ routines, logs, goals, onSave, onDelete, onSaveLog, onToa
           </div>
         ))}
         <button onClick={addExercise} style={{ width:'100%', marginBottom:12, background:'transparent', color:T.lime, border:`1px solid ${T.lime}`, borderRadius:10, padding:'8px', fontFamily:T.B, fontSize:12, cursor:'pointer' }}>＋ Agregar ejercicio</button>
-        <button disabled={!name.trim()||exercises.length===0} onClick={saveRoutine} style={{ width:'100%', background:T.lime, color:'#000', border:'none', borderRadius:10, padding:12, fontFamily:T.B, fontSize:14, fontWeight:700, cursor:'pointer', opacity:!name.trim()||exercises.length===0?0.5:1 }}>Guardar Rutina</button>
+        <button disabled={!name.trim()||exercises.length===0} onClick={handleSave} style={{ width:'100%', background:T.lime, color:'#000', border:'none', borderRadius:10, padding:12, fontFamily:T.B, fontSize:14, fontWeight:700, cursor:'pointer', opacity:!name.trim()||exercises.length===0?0.5:1 }}>Guardar Rutina</button>
       </Modal>
     </div>
   )
@@ -948,7 +947,7 @@ function RoutinesTab({ routines, logs, goals, onSave, onDelete, onSaveLog, onToa
 
 // ─── NUTRITION Tab ────────────────────────────────────────────────────────────
 
-function NutritionTab({ wLogs, nutLogs, goals, onSaveWeight, onSaveNut, onDeleteNut, onSaveGoals }) {
+function NutritionTab({ wLogs, nutLogs, goals, saveWeight, saveNut, deleteNut, saveGoals }) {
   const [wVal, setWVal] = useState('')
   const [inputMode, setInputMode] = useState('text')
   const [mealType, setMealType] = useState('Almuerzo')
@@ -965,7 +964,7 @@ function NutritionTab({ wLogs, nutLogs, goals, onSaveWeight, onSaveNut, onDelete
   const targetCals = parseInt(goals?.targetCals) || 2000
   const targetProtein = parseInt(goals?.targetProtein) || 150
   const maintCals = calcTDEE(goalsEdit, wLogs)
-  const handleSaveNut = (data) => onSaveNut({ ...data, meal:mealType, id:uid(), date:today() })
+  const handleSaveNut = (data) => saveNut({ ...data, meal:mealType, id:uid(), date:today() })
 
   const wSorted = [...wLogs].sort((a,b)=>a.date.localeCompare(b.date)).slice(-10)
 
@@ -1030,7 +1029,7 @@ function NutritionTab({ wLogs, nutLogs, goals, onSaveWeight, onSaveNut, onDelete
                 ))}
               </div>
               <div style={{ display:'flex', gap:6 }}>
-                <button onClick={() => { onSaveNut({id:uid(),date:today(),meal:mealType,...manualNut}); setManualNut({calories:'',protein:'',carbs:'',fat:''}); setShowManual(false) }} style={{ flex:1, background:T.lime, color:'#000', border:'none', borderRadius:10, padding:'9px', fontFamily:T.B, fontSize:13, fontWeight:700, cursor:'pointer' }}>Guardar {mealType}</button>
+                <button onClick={() => { saveNut({id:uid(),date:today(),meal:mealType,...manualNut}); setManualNut({calories:'',protein:'',carbs:'',fat:''}); setShowManual(false) }} style={{ flex:1, background:T.lime, color:'#000', border:'none', borderRadius:10, padding:'9px', fontFamily:T.B, fontSize:13, fontWeight:700, cursor:'pointer' }}>Guardar {mealType}</button>
                 <button onClick={() => setShowManual(false)} style={{ background:T.bg3, color:T.text, border:`1px solid ${T.border}`, borderRadius:10, padding:'9px 14px', fontFamily:T.B, fontSize:13, cursor:'pointer' }}>Cancelar</button>
               </div>
             </div>
@@ -1048,7 +1047,7 @@ function NutritionTab({ wLogs, nutLogs, goals, onSaveWeight, onSaveNut, onDelete
                   <div style={{ display:'flex', gap:4, alignItems:'center' }}>
                     {n.calories && <Pill color={T.orange} size="xs">{Math.round(n.calories)} kcal</Pill>}
                     {n.protein && <Pill color={T.lime} size="xs">{Math.round(n.protein)}g P</Pill>}
-                    <button onClick={() => onDeleteNut(n.id)} style={{ background:'none', border:'none', color:T.muted, cursor:'pointer', fontSize:14, padding:'0 2px' }}>✕</button>
+                    <button onClick={() => deleteNut(n.id)} style={{ background:'none', border:'none', color:T.muted, cursor:'pointer', fontSize:14, padding:'0 2px' }}>✕</button>
                   </div>
                 </div>
               ))}
@@ -1102,7 +1101,7 @@ function NutritionTab({ wLogs, nutLogs, goals, onSaveWeight, onSaveNut, onDelete
           </GlowCard>
           <div style={{ display:'flex', gap:7, alignItems:'flex-end' }}>
             <div style={{ flex:1 }}><SLabel>Registrar hoy</SLabel><NumInput value={wVal} onChange={setWVal} placeholder="72.5" unit="kg"/></div>
-            <button onClick={() => { if(wVal){onSaveWeight(parseFloat(wVal));setWVal('')} }} style={{ background:T.lime, color:'#000', border:'none', borderRadius:10, padding:'9px 16px', fontFamily:T.B, fontSize:13, fontWeight:700, cursor:'pointer' }}>Guardar</button>
+            <button onClick={() => { if(wVal){saveWeight({ date: today(), weight: parseFloat(wVal) });setWVal('')} }} style={{ background:T.lime, color:'#000', border:'none', borderRadius:10, padding:'9px 16px', fontFamily:T.B, fontSize:13, fontWeight:700, cursor:'pointer' }}>Guardar</button>
           </div>
         </>
       )}
@@ -1154,12 +1153,12 @@ function NutritionTab({ wLogs, nutLogs, goals, onSaveWeight, onSaveNut, onDelete
           {[['Peso objetivo','targetWeight','kg','72'],['Calorías diarias','targetCals','kcal',maintCals?String(maintCals):'2500'],['Proteína diaria','targetProtein','g','150'],['Días de gym/sem','gymDays','días','4'],['Tiempo/sesión','workoutTime','min','60']].map(([label,field,unit,ph]) => (
             <div key={field}><SLabel>{label}</SLabel><NumInput value={goalsEdit[field]||''} onChange={v=>setGoalsEdit(g=>({...g,[field]:v}))} placeholder={ph} unit={unit}/></div>
           ))}
-          <button onClick={() => { onSaveGoals(goalsEdit); setShowProfile(false) }} style={{ background:T.lime, color:'#000', border:'none', borderRadius:12, padding:13, fontFamily:T.B, fontSize:14, fontWeight:700, cursor:'pointer', marginTop:4 }}>Guardar Perfil y Metas</button>
+          <button onClick={() => { saveGoals(goalsEdit); setShowProfile(false) }} style={{ background:T.lime, color:'#000', border:'none', borderRadius:12, padding:13, fontFamily:T.B, fontSize:14, fontWeight:700, cursor:'pointer', marginTop:4 }}>Guardar Perfil y Metas</button>
         </div>
       )}
 
       <Modal open={showWizard} onClose={() => setShowWizard(false)} title="✨ Asistente de Metas IA">
-        <AIGoalWizard wLogs={wLogs} onApply={reco => { setGoalsEdit(g=>({...g,...reco})); setShowWizard(false) }} onClose={() => setShowWizard(false)}/>
+        <AIGoalWizard wLogs={wLogs} onApply={reco => { setGoalsEdit(g=>({...g,...reco})) }} onClose={() => setShowWizard(false)}/>
       </Modal>
     </div>
   )
@@ -1176,7 +1175,7 @@ const SPLITS = [
 ]
 const WEEK_DAYS_ES = ['Lunes','Martes','Miércoles','Jueves','Viernes','Sábado','Domingo']
 
-function PlanTab({ logs, nutLogs, goals, wLogs, mealPlan, onSaveMealPlan, routines, onSaveRoutine, onDeleteRoutine, onSaveNut, onSaveGoals }) {
+function PlanTab({ logs, nutLogs, goals, wLogs, mealPlan, saveMealPlan, routines, saveRoutine, deleteRoutine, saveNut, saveGoals }) {
   const [weekOffset, setWeekOffset] = useState(0)
   const [selectedDay, setSelectedDay] = useState(today())
   const [loadingPlan, setLoadingPlan] = useState(false)
@@ -1240,11 +1239,11 @@ Reglas: exactamente 7 días. SOLO días entrenamiento: isRest=false con workout.
       )
       const parsed = JSON.parse(extractJSON(raw))
       if (!parsed.days || !Array.isArray(parsed.days)) throw new Error('Formato inválido')
-      onSaveMealPlan({ ...(mealPlan || {}), ...parsed, generated: today(), targetCals, splitType, gymSchedule: trainDays, customDays: {} })
-      ;(routines || []).filter(r => r.fromPlan).forEach(r => onDeleteRoutine(r.id))
+      saveMealPlan({ ...(mealPlan || {}), ...parsed, generated: today(), targetCals, splitType, gymSchedule: trainDays, customDays: {} })
+      ;(routines || []).filter(r => r.fromPlan).forEach(r => deleteRoutine(r.id))
       parsed.days.forEach(day => {
         if (!day.isRest && day.workout?.exercises?.length > 0) {
-          onSaveRoutine({ id: uid(), name: day.workout.name || day.day, exercises: day.workout.exercises.map(ex => ({ id: uid(), name: ex.name, sets: parseInt(ex.sets) || 3, reps: ex.reps || '10', weight: '' })), aiGenerated: true, fromPlan: true, planDayName: day.day })
+          saveRoutine({ id: uid(), name: day.workout.name || day.day, exercises: day.workout.exercises.map(ex => ({ id: uid(), name: ex.name, sets: parseInt(ex.sets) || 3, reps: ex.reps || '10', weight: '' })), aiGenerated: true, fromPlan: true, planDayName: day.day })
         }
       })
     } catch(e) { console.error(e); setPlanError('Error generando el plan. Revisa tu conexión e intenta de nuevo.') }
@@ -1261,7 +1260,7 @@ Incluye lo que el usuario quiere y ajusta otras comidas para llegar a ~${targetC
         [{ role: 'user', content: `Hoy quiero: ${dayMealInput}. Adapta mi día completo.` }], 700
       )
       const parsed = JSON.parse(extractJSON(raw))
-      onSaveMealPlan({ ...(mealPlan || {}), customDays: { ...(mealPlan?.customDays || {}), [selectedDay]: { ...parsed, custom: true } } })
+      saveMealPlan({ ...(mealPlan || {}), customDays: { ...(mealPlan?.customDays || {}), [selectedDay]: { ...parsed, custom: true } } })
       setDayMealInput('')
     } catch {}
     setLoadingDayMeal(false)
@@ -1277,7 +1276,7 @@ Incluye lo que el usuario quiere y ajusta otras comidas para llegar a ~${targetC
     const match = text.match(/~?(\d{3,4})\s*cal/i)
     const calories = match ? parseInt(match[1]) : Math.round(targetCals / 4)
     const protein = Math.round(calories * (goals?.goalType === 'lose' ? 0.35 : 0.30) / 4)
-    onSaveNut({ id: uid(), date: selectedDay, meal: mealLabel, notes: text, calories, protein, carbs: 0, fat: 0 })
+    saveNut({ id: uid(), date: selectedDay, meal: mealLabel, notes: text, calories, protein, carbs: 0, fat: 0 })
   }
 
   return (
@@ -1319,7 +1318,7 @@ Incluye lo que el usuario quiere y ajusta otras comidas para llegar a ~${targetC
           </div>
           <div style={{ marginBottom: 10 }}>
             <div style={{ fontFamily: T.M, fontSize: 10, color: T.lime, letterSpacing: 1, marginBottom: 5 }}>¿QUÉ ALIMENTOS CONSUMES?</div>
-            <textarea value={userFoods} onChange={e => { setUserFoods(e.target.value); if (onSaveGoals) onSaveGoals({ ...goals, userFoods: e.target.value }) }} rows={2} placeholder="Ej: huevos, pollo, arroz, papa, plátano, frijoles, aguacate..." style={{ width: '100%', background: T.bg4, border: `1px solid ${T.border}`, borderRadius: 8, color: T.text, fontFamily: T.B, fontSize: 11, padding: '7px 9px' }}/>
+            <textarea value={userFoods} onChange={e => { setUserFoods(e.target.value); if (saveGoals) saveGoals({ ...goals, userFoods: e.target.value }) }} rows={2} placeholder="Ej: huevos, pollo, arroz, papa, plátano, frijoles, aguacate..." style={{ width: '100%', background: T.bg4, border: `1px solid ${T.border}`, borderRadius: 8, color: T.text, fontFamily: T.B, fontSize: 11, padding: '7px 9px' }}/>
           </div>
           <button onClick={generateWeekPlan} disabled={loadingPlan} style={{ width: '100%', background: 'linear-gradient(135deg,#7c3aed,#4338ca)', color: '#fff', border: 'none', borderRadius: 10, padding: '10px', fontFamily: T.B, fontSize: 13, fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
             {loadingPlan ? <><Spinner color="#fff"/> Generando...</> : '✨ Generar plan con este split'}
@@ -1406,7 +1405,7 @@ Incluye lo que el usuario quiere y ajusta otras comidas para llegar a ~${targetC
             <div style={{ borderTop: `1px solid ${T.border}`, paddingTop: 10, marginBottom: 10 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
                 <SLabel>Comidas</SLabel>
-                {customDay && <button onClick={() => { const u = { ...(mealPlan || {}) }; const cd = { ...(u.customDays || {}) }; delete cd[selectedDay]; u.customDays = cd; onSaveMealPlan(u) }} style={{ background: 'none', border: 'none', color: T.muted, fontFamily: T.B, fontSize: 10, cursor: 'pointer', padding: 0 }}>↩ Restablecer</button>}
+                {customDay && <button onClick={() => { const u = { ...(mealPlan || {}) }; const cd = { ...(u.customDays || {}) }; delete cd[selectedDay]; u.customDays = cd; saveMealPlan(u) }} style={{ background: 'none', border: 'none', color: T.muted, fontFamily: T.B, fontSize: 10, cursor: 'pointer', padding: 0 }}>↩ Restablecer</button>}
               </div>
               {[['🌅','Desayuno',selectedMealDay.breakfast],['☀️','Almuerzo',selectedMealDay.lunch],['🌙','Cena',selectedMealDay.dinner],['🍎','Merienda',selectedMealDay.snack]].map(([icon, label, text]) => text && (
                 <div key={label} style={{ padding: '6px 0', borderBottom: `1px solid ${T.border}` }}>
@@ -1495,10 +1494,10 @@ function ProgressTab({ logs, wLogs, routines, goals }) {
     .map(l => {
       const ex = l.exercises.find(e => e.name === selExercise)
       const best = Math.max(...(ex?.sets || []).filter(s=>s.weight>0).map(s=>parseFloat(s.weight)||0))
-      return { date: l.date.slice(5), val: best }
-    }).filter(x => x.val > 0) : []
+      return { x: l.date, y: best }
+    }).filter(x => x.y > 0) : []
 
-  const weightData = [...wLogs].sort((a,b)=>a.date.localeCompare(b.date)).slice(-16).map(l=>({ date: l.date.slice(5), val: l.weight }))
+  const weightData = [...wLogs].sort((a,b)=>a.date.localeCompare(b.date)).slice(-16).map(l=>({ x: l.date, y: l.weight }))
 
   const tdee = calcTDEE(goals, wLogs)
   const lastW = [...wLogs].sort((a,b)=>b.date.localeCompare(a.date))[0]?.weight
@@ -1512,7 +1511,7 @@ function ProgressTab({ logs, wLogs, routines, goals }) {
           { label: 'ENTRENAMIENTOS', val: totalWorkouts, unit: 'total', color: T.blue },
           { label: 'EJERCICIOS', val: allExercises.length, unit: 'únicos', color: T.purple },
         ].map(st => (
-          <GlowCard key={st.label} glowColor={st.color} style={{ padding: '12px 8px', textAlign: 'center' }}>
+          <GlowCard key={st.label} glow={st.color} style={{ padding: '12px 8px', textAlign: 'center' }}>
             <div style={{ fontFamily: T.F, fontSize: 28, color: st.color, lineHeight: 1 }}>{st.val}</div>
             <div style={{ fontFamily: T.M, fontSize: 8, color: T.muted, marginTop: 2 }}>{st.unit}</div>
             <div style={{ fontFamily: T.M, fontSize: 7, color: T.muted, marginTop: 1, letterSpacing: 0.5 }}>{st.label}</div>
@@ -1522,7 +1521,7 @@ function ProgressTab({ logs, wLogs, routines, goals }) {
 
       {/* Body weight chart */}
       {weightData.length > 1 && (
-        <GlowCard glowColor={T.blue}>
+        <GlowCard glow={T.blue}>
           <div style={{ fontFamily: T.M, fontSize: 10, color: T.muted, letterSpacing: 1, marginBottom: 8 }}>PESO CORPORAL</div>
           <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, marginBottom: 10 }}>
             <span style={{ fontFamily: T.F, fontSize: 32, color: T.text }}>{lastW}</span>
@@ -1536,7 +1535,7 @@ function ProgressTab({ logs, wLogs, routines, goals }) {
 
       {/* PRs */}
       {prList.length > 0 && (
-        <GlowCard glowColor={T.orange}>
+        <GlowCard glow={T.orange}>
           <div style={{ fontFamily: T.M, fontSize: 10, color: T.muted, letterSpacing: 1, marginBottom: 10 }}>RÉCORDS PERSONALES</div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             {prList.map(([name, pr]) => (
@@ -1554,7 +1553,7 @@ function ProgressTab({ logs, wLogs, routines, goals }) {
 
       {/* Exercise progress */}
       {allExercises.length > 0 && (
-        <GlowCard glowColor={T.teal}>
+        <GlowCard glow={T.teal}>
           <div style={{ fontFamily: T.M, fontSize: 10, color: T.muted, letterSpacing: 1, marginBottom: 8 }}>PROGRESIÓN POR EJERCICIO</div>
           <select
             value={selExercise}
@@ -1567,7 +1566,7 @@ function ProgressTab({ logs, wLogs, routines, goals }) {
           {exerciseData.length > 1 ? (
             <>
               <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, marginBottom: 10 }}>
-                <span style={{ fontFamily: T.F, fontSize: 28, color: T.teal }}>{exerciseData[exerciseData.length-1]?.val}</span>
+                <span style={{ fontFamily: T.F, fontSize: 28, color: T.teal }}>{exerciseData[exerciseData.length-1]?.y}</span>
                 <span style={{ fontFamily: T.M, fontSize: 11, color: T.muted }}>kg max</span>
               </div>
               <LineChart data={exerciseData} color={T.teal} height={70} />
@@ -1843,9 +1842,9 @@ export default function App() {
     setMealPlan(mp); lset(K.mp, mp)
   }, [])
 
-  const addWater = useCallback(() => {
+  const addWater = useCallback((n = 1) => {
     setWater(prev => {
-      const next = prev + 1
+      const next = prev + n
       lset(K.wa, { date: today(), count: next })
       return next
     })
