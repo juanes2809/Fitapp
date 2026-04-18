@@ -5,6 +5,11 @@ export const metadata = {
   description: 'Tu app de entrenamiento con IA',
 }
 
+export const links = [
+  { rel: 'preconnect', href: 'https://fonts.googleapis.com' },
+  { rel: 'preconnect', href: 'https://fonts.gstatic.com', crossOrigin: '' },
+]
+
 export const viewport = {
   width: 'device-width',
   initialScale: 1,
