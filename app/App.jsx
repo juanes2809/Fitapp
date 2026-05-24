@@ -1,5 +1,6 @@
 'use client'
 import { useState, useEffect, useCallback, useRef } from 'react'
+import { getDefaultRoutines } from './defaultRoutines'
 
 const T = {
   bg: '#0a0a0a', bg2: '#131313', bg3: '#1a1a1a', bg4: '#222', bg5: '#2a2a2a',
@@ -508,7 +509,7 @@ function TodayTab({ routines, logs, goals, wLogs, saveLog, saveWeight, mealPlan,
 
   const startWorkout = (routine) => {
     setSession({ routineId: routine.id, routineName: routine.name,
-      exercises: routine.exercises.map(ex => ({ name: ex.name, sets: Array.from({ length: ex.sets }, () => ({ reps: String(ex.reps), weight: ex.weight||'', done: false })) })) })
+      exercises: routine.exercises.map(ex => ({ name: ex.name, sets: Array.from({ length: Math.max(1, parseInt(ex.sets, 10) || 1) }, () => ({ reps: String(ex.reps), weight: ex.weight||'', done: false })) })) })
     setShowPicker(false)
   }
 
@@ -761,22 +762,54 @@ function WeightInline({ onSave }) {
 
 const ROUTINE_COLORS = [T.lime, T.blue, T.orange, T.purple, T.teal, T.pink]
 
-function RoutinesTab({ routines, logs, goals, saveRoutine, deleteRoutine, showToast }) {
+function RoutinesTab({ routines, logs, goals, saveRoutine, deleteRoutine, restoreDefaultRoutines, showToast }) {
   const [subTab, setSubTab] = useState('rutinas')
   const [filter, setFilter] = useState('all')
   const [mode, setMode] = useState(null)
   const [editRoutine, setEditRoutine] = useState(null)
   const [name, setName] = useState('')
   const [exercises, setExercises] = useState([])
+  const [confirmRestore, setConfirmRestore] = useState(false)
 
-  const openManual = (r = null) => { setEditRoutine(r); setName(r?.name||''); setExercises(r ? r.exercises.map(e=>({...e})) : []); setMode('manual') }
-  const addExercise = () => setExercises(e => [...e, { id:uid(), name:'', sets:3, reps:10, weight:'' }])
+  const closeManual = () => { setMode(null); setEditRoutine(null); setName(''); setExercises([]) }
+  const openManual = (r = null) => {
+    setEditRoutine(r)
+    setName(r?.name || '')
+    setExercises(r ? r.exercises.map(e => ({ ...e, id: e.id || uid() })) : [])
+    setMode('manual')
+  }
+  const addExercise = () => setExercises(e => [...e, { id:uid(), name:'', sets:3, reps:'10', weight:'' }])
   const updateExercise = (i, field, val) => setExercises(e => e.map((ex,idx) => idx===i ? {...ex,[field]:val} : ex))
   const removeExercise = (i) => setExercises(e => e.filter((_,idx) => idx!==i))
   const handleSave = () => {
-    if (!name.trim() || exercises.length===0) return
-    saveRoutine({ id:editRoutine?.id||uid(), name:name.trim(), exercises, ...(editRoutine?.aiGenerated?{aiGenerated:true}:{}), ...(editRoutine?.fromPlan?{fromPlan:true,planDayName:editRoutine.planDayName}:{}) })
-    setMode(null)
+    if (!name.trim() || exercises.length === 0) {
+      showToast('Completa el nombre y al menos un ejercicio', T.orange)
+      return
+    }
+    const normalized = exercises.map(ex => ({
+      id: ex.id || uid(),
+      name: ex.name.trim() || 'Ejercicio',
+      sets: Math.max(1, parseInt(ex.sets, 10) || 1),
+      reps: String(ex.reps ?? ''),
+      weight: ex.weight ?? '',
+    }))
+    saveRoutine({
+      id: editRoutine?.id || uid(),
+      name: name.trim(),
+      exercises: normalized,
+      ...(editRoutine?.tag ? { tag: editRoutine.tag } : {}),
+      ...(editRoutine?.aiGenerated ? { aiGenerated: true } : {}),
+      ...(editRoutine?.fromPlan ? { fromPlan: true, planDayName: editRoutine.planDayName } : {}),
+    })
+    showToast('✓ Rutina guardada')
+    closeManual()
+  }
+
+  const handleRestore = () => {
+    restoreDefaultRoutines()
+    setConfirmRestore(false)
+    setFilter('all')
+    showToast('Plan base restaurado · 5 rutinas')
   }
 
   const tags = ['all','FUERZA','CARDIO','MOBILITY']
@@ -814,20 +847,32 @@ function RoutinesTab({ routines, logs, goals, saveRoutine, deleteRoutine, showTo
             </div>
           </div>
 
-          {/* Filter chips */}
-          <div style={{ display:'flex', gap:6, overflowX:'auto', marginBottom:12 }}>
+          {/* Filter chips + restore */}
+          <div style={{ display:'flex', gap:6, overflowX:'auto', marginBottom:12, alignItems:'center' }}>
             {tags.map(t => (
               <button key={t} onClick={() => setFilter(t)} style={{ padding:'6px 14px', borderRadius:999, border:`1px solid ${filter===t?T.lime:T.border}`, background:filter===t?T.lime:T.bg3, color:filter===t?'#000':T.muted, fontFamily:T.M, fontSize:10, fontWeight:700, cursor:'pointer', whiteSpace:'nowrap' }}>{t==='all'?'TODAS':t}</button>
             ))}
+            <button type="button" onClick={() => setConfirmRestore(true)} style={{ marginLeft:'auto', padding:'6px 12px', borderRadius:999, border:`1px solid ${T.border}`, background:T.bg3, color:T.muted, fontFamily:T.B, fontSize:10, cursor:'pointer', whiteSpace:'nowrap', flexShrink:0 }}>↺ Plan base</button>
           </div>
+
+          {confirmRestore && (
+            <div style={{ background:T.bg2, border:`1px solid ${T.orange}66`, borderRadius:12, padding:12, marginBottom:12 }}>
+              <p style={{ fontFamily:T.B, fontSize:12, color:T.text, margin:'0 0 10px' }}>¿Reemplazar todas tus rutinas con el plan Lunes–Viernes del Excel?</p>
+              <div style={{ display:'flex', gap:8 }}>
+                <button type="button" onClick={handleRestore} style={{ flex:1, background:T.orange, color:'#000', border:'none', borderRadius:8, padding:'8px', fontFamily:T.B, fontSize:12, fontWeight:700, cursor:'pointer' }}>Sí, restaurar</button>
+                <button type="button" onClick={() => setConfirmRestore(false)} style={{ flex:1, background:'transparent', color:T.muted, border:`1px solid ${T.border}`, borderRadius:8, padding:'8px', fontFamily:T.B, fontSize:12, cursor:'pointer' }}>Cancelar</button>
+              </div>
+            </div>
+          )}
 
           {displayed.length===0 && (
             <div style={{ textAlign:'center', padding:36, background:T.bg2, border:`1px solid ${T.border}`, borderRadius:16 }}>
               <div style={{ fontSize:36, marginBottom:9 }}>📋</div>
               <p style={{ fontFamily:T.B, color:T.muted, marginBottom:16 }}>Sin rutinas aún. Crea una para empezar.</p>
-              <div style={{ display:'flex', gap:8, justifyContent:'center' }}>
+              <div style={{ display:'flex', gap:8, justifyContent:'center', flexWrap:'wrap' }}>
                 <button onClick={() => setMode('ai')} style={{ background:'linear-gradient(135deg,#7c3aed,#4338ca)', color:'#fff', border:'none', borderRadius:10, padding:'10px 16px', fontFamily:T.B, fontSize:12, fontWeight:700, cursor:'pointer' }}>✨ Generar con IA</button>
                 <button onClick={() => openManual()} style={{ background:'transparent', color:T.lime, border:`1px solid ${T.lime}`, borderRadius:10, padding:'10px 16px', fontFamily:T.B, fontSize:12, cursor:'pointer' }}>＋ Manual</button>
+                <button type="button" onClick={() => setConfirmRestore(true)} style={{ background:'transparent', color:T.orange, border:`1px solid ${T.orange}66`, borderRadius:10, padding:'10px 16px', fontFamily:T.B, fontSize:12, cursor:'pointer' }}>↺ Restaurar plan base</button>
               </div>
             </div>
           )}
@@ -915,7 +960,7 @@ function RoutinesTab({ routines, logs, goals, saveRoutine, deleteRoutine, showTo
         <AIRoutineGen onSave={r => saveRoutine(r)} onClose={() => setMode(null)} goals={goals}/>
       </Modal>
 
-      <Modal open={mode==='manual'} onClose={() => setMode(null)} title={editRoutine ? 'Editar Rutina' : 'Nueva Rutina'}>
+      <Modal open={mode==='manual'} onClose={closeManual} title={editRoutine ? 'Editar Rutina' : 'Nueva Rutina'}>
         <div style={{ marginBottom:12 }}>
           <SLabel>Nombre de la rutina</SLabel>
           <input value={name} onChange={e=>setName(e.target.value)} placeholder="Ej. Push A"
@@ -929,17 +974,24 @@ function RoutinesTab({ routines, logs, goals, saveRoutine, deleteRoutine, showTo
               <button onClick={() => removeExercise(i)} style={{ background:'none', border:'none', color:T.red, cursor:'pointer', fontSize:15 }}>✕</button>
             </div>
             <div style={{ display:'flex', gap:5 }}>
-              {[['Series','sets',''],['Reps','reps',''],['Peso','weight','kg']].map(([label,field,unit]) => (
-                <div key={field} style={{ flex:1 }}>
-                  <div style={{ fontSize:9, color:T.muted, marginBottom:2, fontFamily:T.M }}>{label}</div>
-                  <NumInput value={ex[field]} onChange={v=>updateExercise(i,field,v)} placeholder={field==='weight'?'—':''} unit={unit||undefined} style={{ textAlign:'center', fontSize:12 }}/>
-                </div>
-              ))}
+              <div style={{ flex:1 }}>
+                <div style={{ fontSize:9, color:T.muted, marginBottom:2, fontFamily:T.M }}>Series</div>
+                <NumInput value={ex.sets} onChange={v => updateExercise(i, 'sets', v)} style={{ textAlign:'center', fontSize:12 }}/>
+              </div>
+              <div style={{ flex:2 }}>
+                <div style={{ fontSize:9, color:T.muted, marginBottom:2, fontFamily:T.M }}>Reps</div>
+                <input value={ex.reps} onChange={e => updateExercise(i, 'reps', e.target.value)} placeholder="10, Al fallo, 45 seg…"
+                  style={{ width:'100%', background:T.bg3, border:`1px solid ${T.border}`, borderRadius:8, color:T.text, fontFamily:T.M, fontSize:12, padding:'8px 10px', textAlign:'center' }}/>
+              </div>
+              <div style={{ flex:1 }}>
+                <div style={{ fontSize:9, color:T.muted, marginBottom:2, fontFamily:T.M }}>Peso</div>
+                <NumInput value={ex.weight} onChange={v => updateExercise(i, 'weight', v)} placeholder="—" unit="kg" style={{ textAlign:'center', fontSize:12 }}/>
+              </div>
             </div>
           </div>
         ))}
         <button onClick={addExercise} style={{ width:'100%', marginBottom:12, background:'transparent', color:T.lime, border:`1px solid ${T.lime}`, borderRadius:10, padding:'8px', fontFamily:T.B, fontSize:12, cursor:'pointer' }}>＋ Agregar ejercicio</button>
-        <button disabled={!name.trim()||exercises.length===0} onClick={handleSave} style={{ width:'100%', background:T.lime, color:'#000', border:'none', borderRadius:10, padding:12, fontFamily:T.B, fontSize:14, fontWeight:700, cursor:'pointer', opacity:!name.trim()||exercises.length===0?0.5:1 }}>Guardar Rutina</button>
+        <button type="button" disabled={!name.trim()||exercises.length===0} onClick={handleSave} style={{ width:'100%', background:T.lime, color:'#000', border:'none', borderRadius:10, padding:12, fontFamily:T.B, fontSize:14, fontWeight:700, cursor:!name.trim()||exercises.length===0?'not-allowed':'pointer', opacity:!name.trim()||exercises.length===0?0.5:1 }}>Guardar Rutina</button>
       </Modal>
     </div>
   )
@@ -1780,7 +1832,13 @@ export default function App() {
 
   // Hydrate from localStorage
   useEffect(() => {
-    setRoutines(lget(K.r) || [])
+    const stored = lget(K.r)
+    if (stored?.length) setRoutines(stored)
+    else {
+      const defaults = getDefaultRoutines()
+      setRoutines(defaults)
+      lset(K.r, defaults)
+    }
     setLogs(lget(K.l) || [])
     setWLogs(lget(K.w) || [])
     setNutLogs(lget(K.n) || [])
@@ -1807,6 +1865,12 @@ export default function App() {
 
   const deleteRoutine = useCallback((id) => {
     setRoutines(prev => { const next = prev.filter(r => r.id !== id); lset(K.r, next); return next })
+  }, [])
+
+  const restoreDefaultRoutines = useCallback(() => {
+    const next = getDefaultRoutines()
+    setRoutines(next)
+    lset(K.r, next)
   }, [])
 
   const saveLog = useCallback((log) => {
@@ -1859,7 +1923,7 @@ export default function App() {
   }, [])
 
   const shared = { routines, logs, wLogs, nutLogs, goals, mealPlan, water,
-    saveRoutine, deleteRoutine, saveLog, saveWeight, saveNut, deleteNut,
+    saveRoutine, deleteRoutine, restoreDefaultRoutines, saveLog, saveWeight, saveNut, deleteNut,
     saveGoals, saveMealPlan, addWater, removeWater, showToast }
 
   const TAB_H = 68
