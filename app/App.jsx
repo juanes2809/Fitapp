@@ -19,6 +19,7 @@ const lset = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)) } catc
 const today = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}` }
 const fdate = (d) => new Date(d + 'T12:00:00').toLocaleDateString('es-CO', { weekday: 'short', day: 'numeric', month: 'short' })
 const uid = () => Math.random().toString(36).slice(2, 8)
+const WEEK_DAYS_ES = ['Lunes','Martes','Miércoles','Jueves','Viernes','Sábado','Domingo']
 
 function calcTDEE(goals, wLogs) {
   const lastW = [...(wLogs || [])].sort((a, b) => b.date.localeCompare(a.date))[0]?.weight
@@ -504,6 +505,9 @@ function TodayTab({ routines, logs, goals, wLogs, saveLog, saveWeight, mealPlan,
     return mealPlan.days[idx] || null
   }
   const planToday = getTodayPlanDay()
+  const todayRoutine = planToday?.routineId ? routines.find(r => r.id === planToday.routineId) : null
+  const todayDayName = WEEK_DAYS_ES[new Date().getDay() === 0 ? 6 : new Date().getDay() - 1]
+  const todayIsScheduledGym = mealPlan?.gymSchedule?.includes(todayDayName)
 
   useEffect(() => { const t = setTimeout(() => setWPct(1), 100); return () => clearTimeout(t) }, [])
 
@@ -645,31 +649,37 @@ function TodayTab({ routines, logs, goals, wLogs, saveLog, saveWeight, mealPlan,
               <div style={{ fontFamily:T.F, fontSize:24, color:T.text, letterSpacing:1 }}>{todayLog.routineName.toUpperCase()}</div>
               <div style={{ fontFamily:T.B, fontSize:11, color:T.muted, marginTop:4 }}>{todayLog.exercises.reduce((a,e)=>a+e.sets.filter(s=>s.done).length,0)} series · ¡Buen trabajo!</div>
             </div>
-          ) : planToday && !planToday.isRest && planToday.workout ? (
+          ) : todayRoutine ? (
             <div>
               <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:10 }}>
                 <div>
-                  <div style={{ fontFamily:T.M, fontSize:9, color:T.lime, letterSpacing:2, marginBottom:4 }}>▸ PRÓXIMO ENTRENO · PLAN IA</div>
-                  <div style={{ fontFamily:T.F, fontSize:22, color:T.text, letterSpacing:1, lineHeight:1 }}>{planToday.workout.name.toUpperCase()}</div>
-                  {planToday.workout.focus && <div style={{ fontFamily:T.B, fontSize:11, color:T.muted, marginTop:3 }}>{planToday.workout.focus}</div>}
+                  <div style={{ fontFamily:T.M, fontSize:9, color:T.lime, letterSpacing:2, marginBottom:4 }}>▸ ENTRENO DE HOY · TU PLAN</div>
+                  <div style={{ fontFamily:T.F, fontSize:22, color:T.text, letterSpacing:1, lineHeight:1 }}>{todayRoutine.name.toUpperCase()}</div>
+                  <div style={{ fontFamily:T.B, fontSize:11, color:T.muted, marginTop:3 }}>{todayRoutine.exercises.length} ejercicios</div>
                 </div>
-                <Pill color={T.purple} filled>IA</Pill>
               </div>
               <div style={{ marginBottom:12 }}>
-                {planToday.workout.exercises?.slice(0,3).map((ex,i) => (
+                {todayRoutine.exercises.slice(0,3).map((ex,i) => (
                   <div key={i} style={{ fontFamily:T.B, fontSize:11, color:T.dim, marginBottom:2 }}>• {ex.name} — {ex.sets}×{ex.reps}</div>
                 ))}
+                {todayRoutine.exercises.length > 3 && <div style={{ fontFamily:T.B, fontSize:10, color:T.muted }}>+{todayRoutine.exercises.length - 3} más</div>}
               </div>
-              {routines.length > 0 ? (
+              <button onClick={() => startWorkout(todayRoutine)} style={{ width:'100%', background:T.lime, color:'#000', border:'none', borderRadius:12, padding:14, fontFamily:T.F, fontSize:18, letterSpacing:2, cursor:'pointer', boxShadow:`0 6px 24px ${T.limeGlow}`, marginBottom:8 }}>▶ EMPEZAR AHORA</button>
+              <button onClick={() => setShowPicker(p=>!p)} style={{ width:'100%', background:'transparent', color:T.muted, border:`1px solid ${T.border}`, borderRadius:10, padding:'8px', fontFamily:T.B, fontSize:11, cursor:'pointer' }}>Elegir otra rutina</button>
+              {showPicker && <div style={{ marginTop:10 }}>{routines.filter(r => r.id !== todayRoutine.id).map(r => <button key={r.id} onClick={() => startWorkout(r)} style={{ display:'block', width:'100%', padding:'10px 12px', background:T.bg3, border:`1px solid ${T.border}`, borderRadius:8, color:T.text, fontFamily:T.B, fontSize:13, cursor:'pointer', marginBottom:5, textAlign:'left' }}><span style={{ color:T.lime, marginRight:7 }}>▶</span>{r.name}</button>)}</div>}
+            </div>
+          ) : planToday && !planToday.routineId && todayIsScheduledGym ? (
+            <div style={{ textAlign:'center', padding:'10px 0' }}>
+              <div style={{ fontSize:32, marginBottom:8 }}>📋</div>
+              <div style={{ fontFamily:T.B, fontSize:13, color:T.muted, marginBottom:10 }}>Día de gym en tu plan — elige qué rutina hacer hoy en la pestaña Plan.</div>
+              {routines.length > 0 && (
                 <>
-                  <button onClick={() => setShowPicker(p=>!p)} style={{ width:'100%', background:T.lime, color:'#000', border:'none', borderRadius:12, padding:14, fontFamily:T.F, fontSize:18, letterSpacing:2, cursor:'pointer', boxShadow:`0 6px 24px ${T.limeGlow}` }}>▶ EMPEZAR AHORA</button>
-                  {showPicker && <div style={{ marginTop:10 }}>{routines.map(r => <button key={r.id} onClick={() => startWorkout(r)} style={{ display:'block', width:'100%', padding:'10px 12px', background:T.bg3, border:`1px solid ${T.border}`, borderRadius:8, color:T.text, fontFamily:T.B, fontSize:13, cursor:'pointer', marginBottom:5, textAlign:'left' }}><span style={{ color:T.lime, marginRight:7 }}>▶</span>{r.name}<span style={{ float:'right', color:T.muted, fontSize:11 }}>{r.exercises.length} ej.</span></button>)}</div>}
+                  <button onClick={() => setShowPicker(p=>!p)} style={{ width:'100%', background:T.lime, color:'#000', border:'none', borderRadius:12, padding:14, fontFamily:T.F, fontSize:18, letterSpacing:2, cursor:'pointer', boxShadow:`0 6px 24px ${T.limeGlow}` }}>▶ ENTRENAR IGUAL</button>
+                  {showPicker && <div style={{ marginTop:10 }}>{routines.map(r => <button key={r.id} onClick={() => startWorkout(r)} style={{ display:'block', width:'100%', padding:'10px 12px', background:T.bg3, border:`1px solid ${T.border}`, borderRadius:8, color:T.text, fontFamily:T.B, fontSize:13, cursor:'pointer', marginBottom:5, textAlign:'left' }}><span style={{ color:T.lime, marginRight:7 }}>▶</span>{r.name}</button>)}</div>}
                 </>
-              ) : (
-                <div style={{ fontFamily:T.B, fontSize:11, color:T.muted, textAlign:'center', padding:'8px 0' }}>Crea una rutina en la pestaña Rutinas para empezar.</div>
               )}
             </div>
-          ) : planToday?.isRest ? (
+          ) : planToday && !planToday.routineId ? (
             <div style={{ textAlign:'center', padding:'10px 0' }}>
               <div style={{ fontSize:32, marginBottom:8 }}>😴</div>
               <div style={{ fontFamily:T.B, fontSize:13, color:T.muted }}>Hoy es día de descanso. Camina, estírate, recupérate.</div>
@@ -1225,9 +1235,8 @@ const SPLITS = [
   { id:'bro', label:'Bro Split', desc:'Un músculo por día' },
   { id:'custom', label:'Personalizado', desc:'La IA decide el split ideal' },
 ]
-const WEEK_DAYS_ES = ['Lunes','Martes','Miércoles','Jueves','Viernes','Sábado','Domingo']
 
-function PlanTab({ logs, nutLogs, goals, wLogs, mealPlan, saveMealPlan, routines, saveRoutine, deleteRoutine, saveNut, saveGoals }) {
+function PlanTab({ logs, nutLogs, goals, wLogs, mealPlan, saveMealPlan, routines, saveRoutine, saveNut, saveGoals, showToast }) {
   const [weekOffset, setWeekOffset] = useState(0)
   const [selectedDay, setSelectedDay] = useState(today())
   const [loadingPlan, setLoadingPlan] = useState(false)
@@ -1284,20 +1293,25 @@ Objetivo: ${goalType}. Peso: ${lastW || 75}kg. Tiempo/sesión: ${workoutTime}min
 Días entreno ~${targetCals}kcal, días descanso ~${restCals}kcal. Proteína mínimo ${proteinTarget}g/día.
 ${foodsLine}
 Devuelve SOLO el JSON sin markdown:
-{"days":[{"day":"Lunes","isRest":false,"workout":{"name":"Pecho y Tríceps","focus":"Empuje superior","exercises":[{"name":"Press de banca","sets":4,"reps":"8-10","notes":"baja controlado"}]},"breakfast":"5 huevos + avena (~420cal)","lunch":"Arroz, pollo, ensalada (~650cal)","dinner":"Sopa lentejas (~380cal)","snack":"Banano + huevos (~220cal)","totalCals":${targetCals}}]}
-Reglas: exactamente 7 días. SOLO días entrenamiento: isRest=false con workout. Días descanso: isRest=true, workout=null.`,
+{"routines":[{"name":"Pecho y Tríceps","focus":"Empuje superior","exercises":[{"name":"Press de banca","sets":4,"reps":"8-10","notes":"baja controlado"}]}],"days":[{"day":"Lunes","breakfast":"5 huevos + avena (~420cal)","lunch":"Arroz, pollo, ensalada (~650cal)","dinner":"Sopa lentejas (~380cal)","snack":"Banano + huevos (~220cal)","totalCals":${targetCals}}]}
+Reglas: exactamente 7 días en days (solo comidas, sin workout). routines: ${Math.max(trainDays.length, 3)} rutinas sugeridas para el split (se guardan aparte; el usuario las asigna a cada día).`,
         [{ role: 'user', content: `Plan ${lastW || 75}kg, ${goalType}, split ${selectedSplit.label}. Entreno: ${trainDays.join(', ')}.` }],
         4500
       )
       const parsed = JSON.parse(extractJSON(raw))
       if (!parsed.days || !Array.isArray(parsed.days)) throw new Error('Formato inválido')
-      saveMealPlan({ ...(mealPlan || {}), ...parsed, generated: today(), targetCals, splitType, gymSchedule: trainDays, customDays: {} })
-      ;(routines || []).filter(r => r.fromPlan).forEach(r => deleteRoutine(r.id))
-      parsed.days.forEach(day => {
-        if (!day.isRest && day.workout?.exercises?.length > 0) {
-          saveRoutine({ id: uid(), name: day.workout.name || day.day, exercises: day.workout.exercises.map(ex => ({ id: uid(), name: ex.name, sets: parseInt(ex.sets) || 3, reps: ex.reps || '10', weight: '' })), aiGenerated: true, fromPlan: true, planDayName: day.day })
-        }
+      const days = parsed.days.map(d => ({ ...d, routineId: null }))
+      saveMealPlan({ ...(mealPlan || {}), days, generated: today(), targetCals, splitType, gymSchedule: trainDays, customDays: mealPlan?.customDays || {} })
+      ;(parsed.routines || []).forEach(r => {
+        if (!r?.exercises?.length) return
+        saveRoutine({
+          id: uid(),
+          name: r.name || 'Rutina IA',
+          exercises: r.exercises.map(ex => ({ id: uid(), name: ex.name, sets: parseInt(ex.sets, 10) || 3, reps: ex.reps || '10', weight: '' })),
+          aiGenerated: true,
+        })
       })
+      showToast(`${(parsed.routines || []).length} rutinas sugeridas guardadas · asigna cada día abajo`)
     } catch(e) { console.error(e); setPlanError('Error generando el plan. Revisa tu conexión e intenta de nuevo.') }
     setLoadingPlan(false)
   }
@@ -1320,10 +1334,24 @@ Incluye lo que el usuario quiere y ajusta otras comidas para llegar a ~${targetC
 
   const dayIndex = weekDays.indexOf(selectedDay)
   const planDay = dayIndex >= 0 ? mealPlan?.days?.[dayIndex] : null
+  const assignedRoutine = planDay?.routineId ? routines.find(r => r.id === planDay.routineId) : null
   const customDay = mealPlan?.customDays?.[selectedDay]
   const selectedMealDay = customDay || planDay
   const selectedLog = logs.find(l => l.date === selectedDay)
   const loggedMealsToday = nutLogs.filter(n => n.date === selectedDay).map(n => n.meal)
+
+  const assignDayRoutine = (idx, routineId) => {
+    if (!mealPlan?.days || idx < 0) return
+    const days = mealPlan.days.map((d, i) => i === idx ? { ...d, routineId: routineId || null } : d)
+    saveMealPlan({ ...mealPlan, days })
+  }
+
+  const assignRoutineToGymDays = (routineId) => {
+    if (!mealPlan?.days || !routineId) return
+    const days = mealPlan.days.map(d => gymSchedule.includes(d.day) ? { ...d, routineId } : d)
+    saveMealPlan({ ...mealPlan, days })
+    showToast('Rutina aplicada a todos los días de gym')
+  }
   const logMealFromPlan = (mealLabel, text) => {
     const match = text.match(/~?(\d{3,4})\s*cal/i)
     const calories = match ? parseInt(match[1]) : Math.round(targetCals / 4)
@@ -1385,12 +1413,13 @@ Incluye lo que el usuario quiere y ajusta otras comidas para llegar a ~${targetC
           <div style={{ flex: 1, display: 'grid', gridTemplateColumns: 'repeat(7,1fr)', gap: 3 }}>
             {weekDays.map((date, i) => {
               const planD = mealPlan?.days?.[i]; const hasLog = logs.some(l => l.date === date)
-              const isToday = date === today(); const isSel = date === selectedDay; const isRest = planD?.isRest
+              const isToday = date === today(); const isSel = date === selectedDay
+              const hasRoutine = !!planD?.routineId
               return (
                 <button key={date} onClick={() => setSelectedDay(date)} style={{ background: isSel ? T.lime : isToday ? `${T.lime}18` : T.bg3, border: `2px solid ${isSel ? T.limeD : isToday ? `${T.lime}55` : T.border}`, borderRadius: 9, padding: '6px 2px 5px', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1, transition: 'background 0.15s' }}>
                   <span style={{ fontFamily: T.M, fontSize: 8, color: isSel ? '#000' : T.muted }}>{DAY_SHORT[i]}</span>
                   <span style={{ fontFamily: T.B, fontSize: 14, fontWeight: 800, color: isSel ? '#000' : T.text, lineHeight: 1.1 }}>{new Date(date + 'T12:00:00').getDate()}</span>
-                  <span style={{ fontSize: 9, lineHeight: 1, marginTop: 1 }}>{planD ? (isRest ? '😴' : '💪') : hasLog ? '✓' : ' '}</span>
+                  <span style={{ fontSize: 9, lineHeight: 1, marginTop: 1 }}>{planD ? (hasRoutine ? '💪' : '😴') : hasLog ? '✓' : ' '}</span>
                 </button>
               )
             })}
@@ -1399,58 +1428,125 @@ Incluye lo que el usuario quiere y ajusta otras comidas para llegar a ~${targetC
         </div>
         {mealPlan?.days && (
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7,1fr)', gap: 3, paddingLeft: 32, paddingRight: 32 }}>
-            {mealPlan.days.map((d, i) => (
-              <div key={i} onClick={() => setSelectedDay(weekDays[i])} style={{ cursor: 'pointer', textAlign: 'center', fontFamily: T.M, fontSize: 7, color: weekDays[i] === selectedDay ? T.lime : d.isRest ? T.muted : T.dim, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {d.isRest ? 'Desc.' : (d.workout?.name || 'Gym')}
+            {mealPlan.days.map((d, i) => {
+              const r = d.routineId ? routines.find(x => x.id === d.routineId) : null
+              const label = r ? r.name.split('·')[0].trim() : 'Desc.'
+              return (
+              <div key={i} onClick={() => setSelectedDay(weekDays[i])} style={{ cursor: 'pointer', textAlign: 'center', fontFamily: T.M, fontSize: 7, color: weekDays[i] === selectedDay ? T.lime : r ? T.dim : T.muted, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {label}
               </div>
-            ))}
+            )})}
           </div>
         )}
+        {mealPlan?.days && (
+          <p style={{ fontFamily: T.B, fontSize: 9, color: T.muted, textAlign: 'center', marginTop: 6, marginBottom: 0 }}>
+            Plan semanal fijo — lo que asignes al Lunes vale para todos los lunes
+          </p>
+        )}
       </div>
+
+      {mealPlan?.days && !loadingPlan && routines.length > 0 && (
+        <GlowCard glow={T.lime}>
+          <div style={{ fontFamily: T.M, fontSize: 10, color: T.lime, letterSpacing: 1, marginBottom: 4 }}>RUTINAS DE LA SEMANA</div>
+          <p style={{ fontFamily: T.B, fontSize: 11, color: T.muted, margin: '0 0 12px' }}>
+            Asigna los 7 días de una vez. No hace falta repetir semana a semana.
+          </p>
+          {gymSchedule.length > 0 && (
+            <div style={{ marginBottom: 12, padding: 10, background: T.bg3, borderRadius: 10, border: `1px solid ${T.border}` }}>
+              <div style={{ fontFamily: T.B, fontSize: 10, color: T.muted, marginBottom: 6 }}>Atajo · misma rutina en {gymSchedule.length} días de gym</div>
+              <select
+                defaultValue=""
+                onChange={e => { if (e.target.value) { assignRoutineToGymDays(e.target.value); e.target.value = '' } }}
+                style={{ width: '100%', background: T.bg4, border: `1px solid ${T.border}`, borderRadius: 8, color: T.text, fontFamily: T.B, fontSize: 12, padding: '8px 10px' }}
+              >
+                <option value="">Elegir rutina para todos los días de gym…</option>
+                {routines.map(r => (
+                  <option key={r.id} value={r.id}>{r.name}{r.aiGenerated ? ' ✨' : ''}</option>
+                ))}
+              </select>
+            </div>
+          )}
+          {mealPlan.days.map((day, i) => {
+            const dayDate = weekDays[i]
+            const isSel = dayDate === selectedDay
+            const dayRoutine = day.routineId ? routines.find(r => r.id === day.routineId) : null
+            return (
+              <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6, padding: '6px 8px', background: isSel ? `${T.lime}10` : T.bg3, borderRadius: 8, border: `1px solid ${isSel ? `${T.lime}44` : T.border}` }}>
+                <button type="button" onClick={() => dayDate && setSelectedDay(dayDate)} style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontFamily: T.F, fontSize: 12, color: isSel ? T.lime : T.text, letterSpacing: 1, width: 72, flexShrink: 0, textAlign: 'left' }}>
+                  {day.day.slice(0, 3).toUpperCase()}
+                </button>
+                <select
+                  value={day.routineId || ''}
+                  onChange={e => assignDayRoutine(i, e.target.value || null)}
+                  onClick={e => e.stopPropagation()}
+                  style={{ flex: 1, minWidth: 0, background: T.bg4, border: `1px solid ${T.border}`, borderRadius: 8, color: dayRoutine ? T.text : T.muted, fontFamily: T.B, fontSize: 11, padding: '7px 8px' }}
+                >
+                  <option value="">😴 Descanso</option>
+                  {routines.map(r => (
+                    <option key={r.id} value={r.id}>{r.name}{r.aiGenerated ? ' ✨' : ''}</option>
+                  ))}
+                </select>
+              </div>
+            )
+          })}
+        </GlowCard>
+      )}
 
       {!mealPlan?.days && !loadingPlan && (
         <div style={{ textAlign: 'center', padding: 32, background: T.bg2, border: `1px solid ${T.border}`, borderRadius: 14 }}>
           <div style={{ fontSize: 38, marginBottom: 10 }}>📆</div>
-          <p style={{ fontFamily: T.B, fontSize: 13, color: T.text, marginBottom: 5 }}>Genera tu plan semanal con IA</p>
-          <p style={{ fontFamily: T.B, fontSize: 11, color: T.muted }}>Rutinas para cada día de gym + comidas ajustadas a tu objetivo.</p>
+          <p style={{ fontFamily: T.B, fontSize: 13, color: T.text, marginBottom: 5 }}>Genera comidas y rutinas sugeridas con IA</p>
+          <p style={{ fontFamily: T.B, fontSize: 11, color: T.muted }}>La IA crea las comidas y guarda rutinas recomendadas. Tú eliges qué rutina va en cada día.</p>
         </div>
       )}
       {loadingPlan && (
         <div style={{ textAlign: 'center', padding: 32, background: T.bg2, border: `1px solid ${T.border}`, borderRadius: 14, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}>
           <Spinner color={T.lime}/>
-          <p style={{ fontFamily: T.B, fontSize: 12, color: T.muted }}>Generando rutinas y comidas para los 7 días...</p>
+          <p style={{ fontFamily: T.B, fontSize: 12, color: T.muted }}>Generando comidas y rutinas sugeridas...</p>
         </div>
       )}
       {planError && <p style={{ fontFamily: T.B, fontSize: 12, color: T.red }}>{planError}</p>}
 
       {(mealPlan?.days || selectedLog) && !loadingPlan && (
-        <div style={{ background: `linear-gradient(135deg,${planDay?.isRest ? T.bg3 : `${T.lime}15`},${T.bg2})`, border: `1px solid ${planDay?.isRest ? T.border : `${T.lime}55`}`, borderRadius: 16, padding: 16 }}>
+        <div style={{ background: `linear-gradient(135deg,${!assignedRoutine ? T.bg3 : `${T.lime}15`},${T.bg2})`, border: `1px solid ${!assignedRoutine ? T.border : `${T.lime}55`}`, borderRadius: 16, padding: 16 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
             <div style={{ fontFamily: T.F, fontSize: 17, color: T.lime, letterSpacing: 1 }}>{fdate(selectedDay).toUpperCase()}</div>
-            {planDay?.isRest && <Pill color={T.muted} size="xs">😴 Descanso</Pill>}
+            {planDay && !assignedRoutine && <Pill color={T.muted} size="xs">😴 Descanso</Pill>}
+            {selectedLog && <Pill color={T.lime} size="xs">✓ Entreno hecho</Pill>}
           </div>
-          {planDay && !planDay.isRest && planDay.workout && (
+          {planDay && (
             <div style={{ marginBottom: 14 }}>
-              <div style={{ fontFamily: T.M, fontSize: 9, color: T.purple, letterSpacing: 1, marginBottom: 4 }}>✨ RUTINA DEL DÍA</div>
-              <div style={{ background: `${T.purple}12`, border: `1px solid ${T.purple}44`, borderRadius: 10, padding: 12 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
-                  <div>
-                    <div style={{ fontFamily: T.B, fontWeight: 700, color: T.purple, fontSize: 13 }}>{planDay.workout.name}</div>
-                    {planDay.workout.focus && <div style={{ fontFamily: T.B, fontSize: 10, color: T.muted, marginTop: 2 }}>{planDay.workout.focus}</div>}
-                  </div>
-                  {selectedLog && <Pill color={T.lime} size="xs">✓ Hecho</Pill>}
-                </div>
-                {planDay.workout.exercises?.map((ex, i) => (
-                  <div key={i} style={{ display: 'flex', gap: 8, padding: '5px 0', borderTop: `1px solid ${T.border}`, alignItems: 'flex-start' }}>
-                    <div style={{ background: T.purple, color: '#fff', fontFamily: T.M, fontSize: 9, borderRadius: 4, padding: '2px 5px', minWidth: 20, textAlign: 'center', marginTop: 2, flexShrink: 0 }}>{i + 1}</div>
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontFamily: T.B, fontSize: 12, color: T.text, fontWeight: 700 }}>{ex.name}</div>
-                      <div style={{ fontFamily: T.M, fontSize: 11, color: T.lime }}>{ex.sets} × {ex.reps}</div>
-                      {ex.notes && <div style={{ fontFamily: T.B, fontSize: 10, color: T.muted, marginTop: 1 }}>💡 {ex.notes}</div>}
+              <SLabel>Rutina · {planDay.day} (todos los {planDay.day.toLowerCase()}s)</SLabel>
+              {routines.length === 0 ? (
+                <p style={{ fontFamily: T.B, fontSize: 11, color: T.muted, margin: '4px 0 0' }}>Genera el plan con IA o crea rutinas en la pestaña Rutinas.</p>
+              ) : (
+                <>
+                  <select
+                    value={planDay.routineId || ''}
+                    onChange={e => assignDayRoutine(dayIndex, e.target.value || null)}
+                    style={{ width: '100%', background: T.bg3, border: `1px solid ${T.border}`, borderRadius: 8, color: T.text, fontFamily: T.B, fontSize: 12, padding: '9px 10px', marginBottom: assignedRoutine ? 10 : 0 }}
+                  >
+                    <option value="">😴 Descanso — sin entrenamiento</option>
+                    {routines.map(r => (
+                      <option key={r.id} value={r.id}>{r.name}{r.aiGenerated ? ' ✨' : ''}</option>
+                    ))}
+                  </select>
+                  {assignedRoutine && (
+                    <div style={{ background: `${T.lime}12`, border: `1px solid ${T.lime}44`, borderRadius: 10, padding: 12 }}>
+                      <div style={{ fontFamily: T.B, fontWeight: 700, color: T.lime, fontSize: 13, marginBottom: 8 }}>{assignedRoutine.name}</div>
+                      {assignedRoutine.exercises.map((ex, i) => (
+                        <div key={ex.id || i} style={{ display: 'flex', gap: 8, padding: '5px 0', borderTop: i > 0 ? `1px solid ${T.border}` : 'none', alignItems: 'flex-start' }}>
+                          <div style={{ background: T.lime, color: '#000', fontFamily: T.M, fontSize: 9, borderRadius: 4, padding: '2px 5px', minWidth: 20, textAlign: 'center', marginTop: 2, flexShrink: 0 }}>{i + 1}</div>
+                          <div style={{ flex: 1 }}>
+                            <div style={{ fontFamily: T.B, fontSize: 12, color: T.text, fontWeight: 700 }}>{ex.name}</div>
+                            <div style={{ fontFamily: T.M, fontSize: 11, color: T.lime }}>{ex.sets} × {ex.reps}</div>
+                          </div>
+                        </div>
+                      ))}
                     </div>
-                  </div>
-                ))}
-              </div>
+                  )}
+                </>
+              )}
             </div>
           )}
           {selectedMealDay && (
@@ -1488,21 +1584,24 @@ Incluye lo que el usuario quiere y ajusta otras comidas para llegar a ~${targetC
 
       {mealPlan?.days && !loadingPlan && (
         <div>
-          <div style={{ fontFamily: T.M, fontSize: 10, color: T.muted, letterSpacing: 1, marginBottom: 8 }}>RESUMEN SEMANAL</div>
+          <div style={{ fontFamily: T.M, fontSize: 10, color: T.muted, letterSpacing: 1, marginBottom: 8 }}>COMIDAS DE LA SEMANA</div>
           {mealPlan.days.map((day, i) => {
             const dayDate = weekDays[i]; const isSel = dayDate === selectedDay
             const displayDay = mealPlan.customDays?.[dayDate] || day
+            const dayRoutine = day.routineId ? routines.find(r => r.id === day.routineId) : null
             return (
               <div key={i} onClick={() => dayDate && setSelectedDay(dayDate)} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 12px', background: T.bg2, border: `1px solid ${isSel ? T.lime : T.border}`, borderRadius: 10, marginBottom: 6, cursor: 'pointer' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1, minWidth: 0 }}>
                   <span style={{ fontFamily: T.F, fontSize: 13, color: isSel ? T.lime : T.text, letterSpacing: 1, flexShrink: 0 }}>{day.day.toUpperCase()}</span>
-                  {day.isRest ? <Pill color={T.muted} size="xs">😴 Descanso</Pill> : <Pill color={T.purple} size="xs" style={{ maxWidth: 110, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>💪 {day.workout?.name || 'Gym'}</Pill>}
+                  {dayRoutine
+                    ? <span style={{ fontFamily: T.B, fontSize: 10, color: T.muted, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>💪 {dayRoutine.name}</span>
+                    : <span style={{ fontFamily: T.B, fontSize: 10, color: T.muted }}>😴 Descanso</span>}
                 </div>
                 {displayDay.totalCals && <Pill color={T.orange} size="xs">{displayDay.totalCals} kcal</Pill>}
               </div>
             )
           })}
-          <p style={{ fontFamily: T.M, fontSize: 9, color: T.muted, textAlign: 'center', marginTop: 6 }}>Toca un día para ver el detalle</p>
+          <p style={{ fontFamily: T.M, fontSize: 9, color: T.muted, textAlign: 'center', marginTop: 6 }}>Toca un día para ver comidas y personalizarlas</p>
         </div>
       )}
     </div>
